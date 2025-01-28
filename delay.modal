@@ -1,0 +1,19 @@
+// Minimal delay implementation
+
+state {
+    buffer: Buffer
+}
+
+inputs {
+    sig: sig,
+    feedback: percentage = 20%,
+    delay: time = 10ms,
+}
+
+step {
+    buffer.resize(delay);
+    let out = buffer.pop_back();
+    buffer.push_front(sig + out * feedback);
+
+    yield out;
+}
