@@ -1,6 +1,8 @@
 use chumsky::Parser;
+use compile::Compiler;
 use parse::Program;
 
+mod compile;
 mod parse;
 
 fn main() {
@@ -13,4 +15,9 @@ fn main() {
     let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
 
     println!("{prog:#?}");
+
+    let mut compiler = Compiler::new().unwrap();
+    let proc = compiler.compile(&prog).unwrap();
+
+    println!("result: {}", proc());
 }

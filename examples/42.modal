@@ -1,0 +1,8 @@
+state { }
+inputs { }
+
+step {
+    let tens = 4;
+    let ones = 2;
+    yield tens * 10 + ones;
+}
