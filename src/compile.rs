@@ -104,6 +104,7 @@ impl Compiler {
         expr: &Expr,
     ) -> Value {
         match expr {
+            Expr::Literal(Literal::Float(f)) => builder.ins().f32const(*f),
             Expr::Let(Let { name, value }) => {
                 let value = Self::recurse(builder, retss, stack, &value);
                 stack.set(name.0.to_string(), value);
@@ -136,7 +137,6 @@ impl Compiler {
                     BinopKind::Div => builder.ins().fdiv(l, r),
                 }
             }
-            Expr::Literal(Literal::Float(f)) => builder.ins().f32const(*f),
             Expr::Yield(Yield { value }) => {
                 let value = Self::recurse(builder, retss, stack, value);
                 builder.ins().stack_store(value, retss, 0);
