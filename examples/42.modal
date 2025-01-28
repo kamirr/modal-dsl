@@ -3,6 +3,9 @@ inputs { }
 
 step {
     let tens = 4;
-    let ones = 2;
-    yield tens * 10 + ones;
+    yield {
+        let ones = 2;
+
+        tens * 10 + ones
+    };
 }

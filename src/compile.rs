@@ -16,6 +16,7 @@ use varstack::VarStack;
 
 use crate::parse::{
     binop::{Binop, BinopKind},
+    block::Block,
     expr::Expr,
     let_::Let,
     literal::Literal,
@@ -77,7 +78,7 @@ impl Compiler {
         let retss =
             builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 4, 4));
 
-        for expr in &program.step().0 {
+        for expr in &program.step().0.exprs {
             Self::recurse(&mut builder, retss, &mut stack, expr);
         }
 
@@ -114,6 +115,19 @@ impl Compiler {
             Expr::Var(Path(path)) => {
                 assert_eq!(path.len(), 1);
                 stack.get(&path[0].0).unwrap()
+            }
+            Expr::Block(Block { exprs, ret_last }) => {
+                stack.push();
+                let mut last = None;
+                for expr in exprs {
+                    last = Some(Self::recurse(builder, retss, stack, expr));
+                }
+                stack.pop();
+                if *ret_last {
+                    last.unwrap()
+                } else {
+                    Self::recurse(builder, retss, stack, &Expr::Literal(Literal::Float(0.0)))
+                }
             }
             Expr::Binop(Binop { left, right, op }) => {
                 let l = Self::recurse(builder, retss, stack, left);

@@ -1,34 +1,47 @@
-use chumsky::{error::Simple, prelude::just, text::whitespace, Parser};
+use chumsky::{
+    error::Simple,
+    prelude::{just, Recursive},
+    text::TextParser,
+    Parser,
+};
 
-use super::{block::Block, expr::Expr};
+use super::expr::Expr;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Step(pub Block);
+pub struct Block {
+    pub exprs: Vec<Expr>,
+    pub ret_last: bool,
+}
 
-impl Step {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
-        just("step")
+impl Block {
+    pub fn parser<'a>(
+        expr: Recursive<'a, char, Expr, Simple<char>>,
+    ) -> impl Parser<char, Self, Error = Simple<char>> + 'a {
+        just("{")
+            .padded()
             .ignored()
-            .then_ignore(whitespace())
-            .then(Expr::parser(sample_rate))
-            .map(|((), blk)| blk)
-            .try_map(|expr, span| {
-                if let Expr::Block(blk) = expr {
-                    Ok(blk)
+            .then(expr.clone().then_ignore(just(";").padded()).repeated())
+            .then(
+                expr.clone()
+                    .then(just(";").padded().or_not())
+                    .padded()
+                    .or_not(),
+            )
+            .then_ignore(just("}").padded())
+            .map(|(((), mut exprs), last)| {
+                if let Some((last, semicolon)) = last {
+                    exprs.push(last);
+                    Block {
+                        exprs,
+                        ret_last: semicolon.is_none(),
+                    }
                 } else {
-                    Err(Simple::custom(span, "Main step expression must be a block"))
+                    Block {
+                        exprs,
+                        ret_last: false,
+                    }
                 }
             })
-            .validate(|blk, span, emit| {
-                if blk.ret_last {
-                    emit(Simple::custom(
-                        span,
-                        "Main block of step cannot omit the last semicolon",
-                    ));
-                }
-                blk
-            })
-            .map(Step)
     }
 }
 
@@ -36,7 +49,6 @@ impl Step {
 mod tests {
     use crate::parse::{
         binop::{Binop, BinopKind},
-        expr::Expr,
         let_::Let,
         literal::Literal,
         path::{Ident, Path},
@@ -49,17 +61,17 @@ mod tests {
     fn test_state() {
         let cases = [
             (
-                "step{yield 2.0;}",
-                Step(Block {
+                "{yield 2.0;}",
+                Block {
                     exprs: vec![Expr::Yield(Yield {
                         value: Box::new(Expr::Literal(Literal::Float(2.0))),
                     })],
                     ret_last: false,
-                }),
+                },
             ),
             (
-                "step { let two = 2; let three = 3e1; yield two / three; } ",
-                Step(Block {
+                " { let two = 2; let three = 3e1; yield two / three; two } ",
+                Block {
                     exprs: vec![
                         Expr::Let(Let {
                             name: Ident::new("two"),
@@ -76,14 +88,15 @@ mod tests {
                                 op: BinopKind::Div,
                             })),
                         }),
+                        Expr::Var(Path(vec![Ident::new("two")])),
                     ],
-                    ret_last: false,
-                }),
+                    ret_last: true,
+                },
             ),
         ];
 
         for (text, expected) in cases {
-            assert_eq!(Step::parser(44100.0).parse(text), Ok(expected));
+            assert_eq!(Expr::parser(44100.0).parse(text), Ok(Expr::Block(expected)));
         }
     }
 }

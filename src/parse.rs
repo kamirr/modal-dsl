@@ -3,6 +3,7 @@ use item::Item;
 use step::Step;
 
 pub mod binop;
+pub mod block;
 pub mod call;
 pub mod expr;
 pub mod inputs;

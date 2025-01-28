@@ -8,6 +8,7 @@ use chumsky::{
 
 use super::{
     binop::{Binop, BinopKind},
+    block::Block,
     call::Call,
     let_::Let,
     literal::Literal,
@@ -17,6 +18,7 @@ use super::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Expr {
+    Block(Block),
     Call(Call),
     Var(Path),
     Let(Let),
@@ -30,6 +32,7 @@ impl Expr {
         recursive::recursive(|expr| {
             let atom = Literal::parser(sample_rate)
                 .map(Expr::Literal)
+                .or(Block::parser(expr.clone()).map(Expr::Block))
                 .or(Call::parser(expr.clone()).map(Expr::Call))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))

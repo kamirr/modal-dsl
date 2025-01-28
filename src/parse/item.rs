@@ -21,6 +21,8 @@ impl Item {
 
 #[cfg(test)]
 mod tests {
+    use crate::parse::block::Block;
+
     use super::*;
 
     #[test]
@@ -28,7 +30,13 @@ mod tests {
         let cases = [
             ("state {}", Item::StateDef(State(vec![]))),
             ("inputs {}", Item::InputsDef(Inputs(vec![]))),
-            ("step {}", Item::StepDef(Step(vec![]))),
+            (
+                "step {}",
+                Item::StepDef(Step(Block {
+                    exprs: vec![],
+                    ret_last: false,
+                })),
+            ),
         ];
 
         for (text, expected) in cases {
