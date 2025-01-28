@@ -5,7 +5,7 @@ use chumsky::{
     Parser,
 };
 
-use super::{expr::Expr, path::Ident};
+use super::{expr::Expr, kwords::LET, path::Ident};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Let {
@@ -17,7 +17,7 @@ impl Let {
     pub fn parser<'a>(
         expr: Recursive<'a, char, Expr, Simple<char>>,
     ) -> impl Parser<char, Self, Error = Simple<char>> + 'a {
-        just("let")
+        just(LET)
             .padded()
             .ignored()
             .then(Ident::parser())

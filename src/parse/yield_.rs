@@ -5,7 +5,7 @@ use chumsky::{
     Parser,
 };
 
-use super::expr::Expr;
+use super::{expr::Expr, kwords::YIELD};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Yield {
@@ -16,7 +16,7 @@ impl Yield {
     pub fn parser<'a>(
         expr: Recursive<'a, char, Expr, Simple<char>>,
     ) -> impl Parser<char, Self, Error = Simple<char>> + 'a {
-        just("yield")
+        just(YIELD)
             .padded()
             .ignored()
             .then(expr)
