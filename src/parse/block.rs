@@ -14,9 +14,9 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn parser<'a>(
-        expr: Recursive<'a, char, Expr, Simple<char>>,
-    ) -> impl Parser<char, Self, Error = Simple<char>> + 'a {
+    pub fn parser(
+        expr: Recursive<'_, char, Expr, Simple<char>>,
+    ) -> impl Parser<char, Self, Error = Simple<char>> + '_ {
         just("{")
             .padded()
             .ignored()

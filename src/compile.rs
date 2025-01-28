@@ -92,7 +92,7 @@ impl Compiler {
 
         let code = self.module.get_finalized_function(id);
 
-        let func = unsafe { std::mem::transmute::<_, fn() -> f32>(code) };
+        let func = unsafe { std::mem::transmute::<*const u8, fn() -> f32>(code) };
 
         Ok(func)
     }
@@ -106,7 +106,7 @@ impl Compiler {
         match expr {
             Expr::Literal(Literal::Float(f)) => builder.ins().f32const(*f),
             Expr::Let(Let { name, value }) => {
-                let value = Self::recurse(builder, retss, stack, &value);
+                let value = Self::recurse(builder, retss, stack, value);
                 stack.set(name.0.to_string(), value);
                 value
             }

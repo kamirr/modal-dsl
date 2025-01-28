@@ -54,7 +54,9 @@ impl Expr {
                 })
                 .or(atom.clone());
 
-            let sum = product
+            
+
+            product
                 .clone()
                 .then(choice((BinopKind::Add.parser(), BinopKind::Sub.parser())))
                 .then(product.clone())
@@ -65,9 +67,7 @@ impl Expr {
                         op,
                     })
                 })
-                .or(product);
-
-            sum
+                .or(product)
         })
     }
 }

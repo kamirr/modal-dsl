@@ -31,18 +31,9 @@ impl Program {
             .padded()
             .repeated()
             .validate(|items, span, emit| {
-                let states = items
-                    .iter()
-                    .filter(|i| matches!(i, Item::StateDef(_)))
-                    .count();
-                let inputs = items
-                    .iter()
-                    .filter(|i| matches!(i, Item::StateDef(_)))
-                    .count();
-                let steps = items
-                    .iter()
-                    .filter(|i| matches!(i, Item::StepDef(_)))
-                    .count();
+                let states = items.iter().filter(|i| matches!(i, Item::State(_))).count();
+                let inputs = items.iter().filter(|i| matches!(i, Item::State(_))).count();
+                let steps = items.iter().filter(|i| matches!(i, Item::Step(_))).count();
 
                 for (var, name) in [(states, "state"), (inputs, "inputs"), (steps, "step")] {
                     if var == 0 {
@@ -63,7 +54,7 @@ impl Program {
         self.0
             .iter()
             .find_map(|item| match item {
-                Item::StepDef(step) => Some(step),
+                Item::Step(step) => Some(step),
                 _ => None,
             })
             .unwrap()

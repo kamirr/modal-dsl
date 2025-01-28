@@ -14,9 +14,9 @@ pub struct Call {
 }
 
 impl Call {
-    pub fn parser<'a>(
-        expr: Recursive<'a, char, Expr, Simple<char>>,
-    ) -> impl Parser<char, Self, Error = Simple<char>> + 'a {
+    pub fn parser(
+        expr: Recursive<'_, char, Expr, Simple<char>>,
+    ) -> impl Parser<char, Self, Error = Simple<char>> + '_ {
         Path::parser()
             .then_ignore(whitespace())
             .then_ignore(just("("))
