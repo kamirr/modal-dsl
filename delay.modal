@@ -1,7 +1,5 @@
-// Minimal delay implementation
-
 state {
-    buffer: Buffer
+    buffer: buffer
 }
 
 inputs {

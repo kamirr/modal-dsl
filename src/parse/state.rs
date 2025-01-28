@@ -1,9 +1,11 @@
 use chumsky::{
     error::Simple,
     prelude::{choice, just},
-    text::{ident, whitespace},
+    text::whitespace,
     Parser,
 };
+
+use super::path::Ident;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StateVarType {
@@ -22,33 +24,31 @@ impl StateVarType {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StateEntry {
-    name: String,
+    name: Ident,
     ty: StateVarType,
 }
 
 impl StateEntry {
+    #[cfg(test)]
     pub fn new(name: impl Into<String>, ty: StateVarType) -> Self {
         StateEntry {
-            name: name.into(),
+            name: Ident::new(name),
             ty,
         }
     }
 
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        ident()
+        Ident::parser()
             .then_ignore(whitespace())
             .then_ignore(just(":"))
             .then_ignore(whitespace())
             .then(StateVarType::parser())
-            .map(|(name, ty)| StateEntry {
-                name: name.to_string(),
-                ty,
-            })
+            .map(|(name, ty)| StateEntry { name, ty })
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct State(Vec<StateEntry>);
+pub struct State(pub Vec<StateEntry>);
 
 impl State {
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
@@ -106,7 +106,7 @@ mod tests {
             assert_eq!(
                 StateEntry::parser().parse(text),
                 Ok(StateEntry {
-                    name: name.to_string(),
+                    name: Ident::new(name),
                     ty
                 })
             );
