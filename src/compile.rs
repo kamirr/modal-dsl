@@ -69,7 +69,7 @@ impl Compiler {
         let retss = TypedStackSlot::float()(&mut builder);
 
         let mut recursor = Recursor::new(&mut builder, &mut stack, retss);
-        for expr in &mut program.step_mut().0.exprs {
+        for expr in &program.step().0.exprs {
             recursor.recurse(expr);
         }
 

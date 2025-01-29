@@ -33,7 +33,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }
     }
 
-    pub fn recurse(&mut self, expr: &mut Expr) -> TypedValue {
+    pub fn recurse(&mut self, expr: &Expr) -> TypedValue {
         match expr {
             Expr::Literal(Literal::Float(f)) => TypedValue::float(self.builder, *f),
             Expr::Let(Let { name, value }) => {
@@ -45,7 +45,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             Expr::Block(Block { exprs, ret_last }) => {
                 self.stack.push();
                 let last = exprs
-                    .iter_mut()
+                    .iter()
                     .map(|expr| self.recurse(expr))
                     .last()
                     .unwrap_or(TypedValue::UNIT);

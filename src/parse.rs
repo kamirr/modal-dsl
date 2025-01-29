@@ -51,9 +51,9 @@ impl Program {
             .map(Program)
     }
 
-    pub fn step_mut(&mut self) -> &mut Step {
+    pub fn step(&self) -> &Step {
         self.0
-            .iter_mut()
+            .iter()
             .find_map(|item| match item {
                 Item::Step(step) => Some(step),
                 _ => None,
