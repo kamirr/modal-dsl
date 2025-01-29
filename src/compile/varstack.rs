@@ -1,11 +1,5 @@
-use cranelift::prelude::Value;
+use super::typed::TypedValue;
 use std::collections::HashMap;
-
-#[derive(Debug, Clone, Copy)]
-pub enum TypedValue {
-    Unit,
-    Float(Value),
-}
 
 #[derive(Debug, Clone)]
 pub struct VarStack {

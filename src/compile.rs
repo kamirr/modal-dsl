@@ -1,3 +1,5 @@
+mod recursor;
+mod typed;
 mod varstack;
 
 use cranelift::{
@@ -5,15 +7,14 @@ use cranelift::{
     module::{default_libcall_names, Linkage, Module},
     prelude::{
         types::F32, AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
-        StackSlotData, StackSlotKind,
     },
 };
-use cranelift_codegen::{ir::StackSlot, settings, Context};
-use varstack::{TypedValue, VarStack};
+use cranelift_codegen::{settings, Context};
+use recursor::Recursor;
+use typed::{TypedStackSlot, TypedValue};
+use varstack::VarStack;
 
-use crate::parse::{
-    binop::BinopKind, block::Block, expr::Expr, let_::Let, literal::Literal, yield_::Yield, Program,
-};
+use crate::parse::Program;
 
 pub struct Compiler {
     module: JITModule,
@@ -65,14 +66,14 @@ impl Compiler {
         builder.switch_to_block(block);
 
         let mut stack = VarStack::new();
-        let retss =
-            builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 4, 4));
+        let retss = TypedStackSlot::float()(&mut builder);
 
+        let mut recursor = Recursor::new(&mut builder, &mut stack, retss);
         for expr in &mut program.step_mut().0.exprs {
-            Self::recurse(&mut builder, retss, &mut stack, expr);
+            recursor.recurse(expr);
         }
 
-        let read_ret = builder.ins().stack_load(F32, retss, 0);
+        let read_ret = TypedValue::stack_load(&mut builder, retss).inner().unwrap();
         builder.ins().return_(&[read_ret]);
 
         println!("{}", builder.func.display());
@@ -88,66 +89,5 @@ impl Compiler {
         let func = unsafe { std::mem::transmute::<*const u8, fn() -> f32>(code) };
 
         Ok(func)
-    }
-
-    fn recurse(
-        builder: &mut FunctionBuilder<'_>,
-        retss: StackSlot,
-        stack: &mut VarStack,
-        expr: &mut Expr,
-    ) -> TypedValue {
-        match expr {
-            Expr::Literal(Literal::Float(f)) => TypedValue::Float(builder.ins().f32const(*f)),
-            Expr::Let(Let { name, value }) => {
-                let tv = Self::recurse(builder, retss, stack, value);
-                stack.set(name.0.to_string(), tv);
-                tv
-            }
-            Expr::Var(var) => {
-                let tv = stack.get(&var.name.0).unwrap();
-
-                tv
-            }
-            Expr::Block(Block { exprs, ret_last }) => {
-                stack.push();
-                let mut last = None;
-                for expr in exprs {
-                    last = Some(Self::recurse(builder, retss, stack, expr));
-                }
-                stack.pop();
-                if *ret_last {
-                    last.unwrap()
-                } else {
-                    TypedValue::Unit
-                }
-            }
-            Expr::Binop(binop) => {
-                let l_tv = Self::recurse(builder, retss, stack, &mut binop.left);
-                let r_tv = Self::recurse(builder, retss, stack, &mut binop.right);
-
-                let TypedValue::Float(l) = l_tv else { todo!() };
-                let TypedValue::Float(r) = r_tv else { todo!() };
-
-                let val = match binop.op {
-                    BinopKind::Add => builder.ins().fadd(l, r),
-                    BinopKind::Sub => builder.ins().fsub(l, r),
-                    BinopKind::Mul => builder.ins().fmul(l, r),
-                    BinopKind::Div => builder.ins().fdiv(l, r),
-                };
-
-                TypedValue::Float(val)
-            }
-            Expr::Yield(Yield { value }) => {
-                let tv = Self::recurse(builder, retss, stack, value);
-
-                let TypedValue::Float(value) = tv else {
-                    todo!()
-                };
-
-                builder.ins().stack_store(value, retss, 0);
-                tv
-            }
-            _ => todo!(),
-        }
     }
 }
