@@ -5,21 +5,14 @@ use cranelift::{
     module::{default_libcall_names, Linkage, Module},
     prelude::{
         types::F32, AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
-        StackSlotData, StackSlotKind, Value,
+        StackSlotData, StackSlotKind,
     },
 };
 use cranelift_codegen::{ir::StackSlot, settings, Context};
-use varstack::VarStack;
+use varstack::{TypedValue, VarStack};
 
 use crate::parse::{
-    binop::{Binop, BinopKind},
-    block::Block,
-    expr::Expr,
-    let_::Let,
-    literal::Literal,
-    path::Path,
-    yield_::Yield,
-    Program,
+    binop::BinopKind, block::Block, expr::Expr, let_::Let, literal::Literal, yield_::Yield, Program,
 };
 
 pub struct Compiler {
@@ -52,7 +45,7 @@ impl Compiler {
         Ok(Compiler { module, module_ctx })
     }
 
-    pub fn compile(&mut self, program: &Program) -> anyhow::Result<fn() -> f32> {
+    pub fn compile(&mut self, program: &mut Program) -> anyhow::Result<fn() -> f32> {
         self.module_ctx.func.signature.params = vec![];
         self.module_ctx.func.signature.returns = vec![AbiParam::new(F32)];
 
@@ -75,7 +68,7 @@ impl Compiler {
         let retss =
             builder.create_sized_stack_slot(StackSlotData::new(StackSlotKind::ExplicitSlot, 4, 4));
 
-        for expr in &program.step().0.exprs {
+        for expr in &mut program.step_mut().0.exprs {
             Self::recurse(&mut builder, retss, &mut stack, expr);
         }
 
@@ -101,18 +94,19 @@ impl Compiler {
         builder: &mut FunctionBuilder<'_>,
         retss: StackSlot,
         stack: &mut VarStack,
-        expr: &Expr,
-    ) -> Value {
+        expr: &mut Expr,
+    ) -> TypedValue {
         match expr {
-            Expr::Literal(Literal::Float(f)) => builder.ins().f32const(*f),
+            Expr::Literal(Literal::Float(f)) => TypedValue::Float(builder.ins().f32const(*f)),
             Expr::Let(Let { name, value }) => {
-                let value = Self::recurse(builder, retss, stack, value);
-                stack.set(name.0.to_string(), value);
-                value
+                let tv = Self::recurse(builder, retss, stack, value);
+                stack.set(name.0.to_string(), tv);
+                tv
             }
-            Expr::Var(Path(path)) => {
-                assert_eq!(path.len(), 1);
-                stack.get(&path[0].0).unwrap()
+            Expr::Var(var) => {
+                let tv = stack.get(&var.name.0).unwrap();
+
+                tv
             }
             Expr::Block(Block { exprs, ret_last }) => {
                 stack.push();
@@ -124,23 +118,34 @@ impl Compiler {
                 if *ret_last {
                     last.unwrap()
                 } else {
-                    Self::recurse(builder, retss, stack, &Expr::Literal(Literal::Float(0.0)))
+                    TypedValue::Unit
                 }
             }
-            Expr::Binop(Binop { left, right, op }) => {
-                let l = Self::recurse(builder, retss, stack, left);
-                let r = Self::recurse(builder, retss, stack, right);
-                match op {
+            Expr::Binop(binop) => {
+                let l_tv = Self::recurse(builder, retss, stack, &mut binop.left);
+                let r_tv = Self::recurse(builder, retss, stack, &mut binop.right);
+
+                let TypedValue::Float(l) = l_tv else { todo!() };
+                let TypedValue::Float(r) = r_tv else { todo!() };
+
+                let val = match binop.op {
                     BinopKind::Add => builder.ins().fadd(l, r),
                     BinopKind::Sub => builder.ins().fsub(l, r),
                     BinopKind::Mul => builder.ins().fmul(l, r),
                     BinopKind::Div => builder.ins().fdiv(l, r),
-                }
+                };
+
+                TypedValue::Float(val)
             }
             Expr::Yield(Yield { value }) => {
-                let value = Self::recurse(builder, retss, stack, value);
+                let tv = Self::recurse(builder, retss, stack, value);
+
+                let TypedValue::Float(value) = tv else {
+                    todo!()
+                };
+
                 builder.ins().stack_store(value, retss, 0);
-                value
+                tv
             }
             _ => todo!(),
         }

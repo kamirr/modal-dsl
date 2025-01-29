@@ -12,7 +12,7 @@ use super::{
     call::Call,
     let_::Let,
     literal::Literal,
-    path::Path,
+    var::Var,
     yield_::Yield,
 };
 
@@ -20,7 +20,7 @@ use super::{
 pub enum Expr {
     Block(Block),
     Call(Call),
-    Var(Path),
+    Var(Var),
     Let(Let),
     Yield(Yield),
     Literal(Literal),
@@ -36,7 +36,7 @@ impl Expr {
                 .or(Call::parser(expr.clone()).map(Expr::Call))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))
-                .or(Path::parser().map(Expr::Var))
+                .or(Var::parser().map(Expr::Var))
                 .or(expr.clone().delimited_by(just('('), just(')')))
                 .padded()
                 .boxed();
@@ -53,8 +53,6 @@ impl Expr {
                     })
                 })
                 .or(atom.clone());
-
-            
 
             product
                 .clone()
@@ -80,14 +78,11 @@ mod tests {
 
     #[test]
     fn test_var() {
-        let cases = [
-            ("foo", vec![Ident::new("foo")]),
-            ("foo.bar", vec![Ident::new("foo"), Ident::new("bar")]),
-        ];
+        let cases = [("foo", Ident::new("foo"))];
         for (text, expected) in cases {
             assert_eq!(
                 Expr::parser(44100.0).parse(text),
-                Ok(Expr::Var(Path(expected)))
+                Ok(Expr::Var(Var { name: expected }))
             )
         }
     }
@@ -112,7 +107,9 @@ mod tests {
         let cases = [(
             "yield foo",
             Yield {
-                value: Box::new(Expr::Var(Path(vec![Ident::new("foo")]))),
+                value: Box::new(Expr::Var(Var {
+                    name: Ident::new("foo"),
+                })),
             },
         )];
 
@@ -144,7 +141,9 @@ mod tests {
                         right: Box::new(Expr::Literal(Literal::Float(3.0))),
                         op: BinopKind::Mul,
                     })),
-                    right: Box::new(Expr::Var(Path(vec![Ident::new("x")]))),
+                    right: Box::new(Expr::Var(Var {
+                        name: Ident::new("x"),
+                    })),
                     op: BinopKind::Add,
                 },
             ),

@@ -13,6 +13,7 @@ pub mod literal;
 pub mod path;
 pub mod state;
 pub mod step;
+pub mod var;
 pub mod yield_;
 
 pub mod kwords {
@@ -50,9 +51,9 @@ impl Program {
             .map(Program)
     }
 
-    pub fn step(&self) -> &Step {
+    pub fn step_mut(&mut self) -> &mut Step {
         self.0
-            .iter()
+            .iter_mut()
             .find_map(|item| match item {
                 Item::Step(step) => Some(step),
                 _ => None,

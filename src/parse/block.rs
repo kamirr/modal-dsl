@@ -51,7 +51,8 @@ mod tests {
         binop::{Binop, BinopKind},
         let_::Let,
         literal::Literal,
-        path::{Ident, Path},
+        path::Ident,
+        var::Var,
         yield_::Yield,
     };
 
@@ -83,12 +84,12 @@ mod tests {
                         }),
                         Expr::Yield(Yield {
                             value: Box::new(Expr::Binop(Binop {
-                                left: Box::new(Expr::Var(Path(vec![Ident::new("two")]))),
-                                right: Box::new(Expr::Var(Path(vec![Ident::new("three")]))),
+                                left: Box::new(Expr::Var(Var::new("two"))),
+                                right: Box::new(Expr::Var(Var::new("three"))),
                                 op: BinopKind::Div,
                             })),
                         }),
-                        Expr::Var(Path(vec![Ident::new("two")])),
+                        Expr::Var(Var::new("two")),
                     ],
                     ret_last: true,
                 },

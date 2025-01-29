@@ -1,9 +1,15 @@
 use cranelift::prelude::Value;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Copy)]
+pub enum TypedValue {
+    Unit,
+    Float(Value),
+}
+
 #[derive(Debug, Clone)]
 pub struct VarStack {
-    inner: Vec<HashMap<String, Value>>,
+    inner: Vec<HashMap<String, TypedValue>>,
 }
 
 impl VarStack {
@@ -21,7 +27,7 @@ impl VarStack {
         self.inner.pop().unwrap();
     }
 
-    pub fn get(&self, name: &str) -> anyhow::Result<Value> {
+    pub fn get(&self, name: &str) -> anyhow::Result<TypedValue> {
         for layer in self.inner.iter().rev() {
             if let Some(entry) = layer.get(name) {
                 return Ok(*entry);
@@ -31,7 +37,7 @@ impl VarStack {
         Err(anyhow::Error::msg(format!("Variable {name} undefined")))
     }
 
-    pub fn set(&mut self, name: String, value: Value) {
-        self.inner.last_mut().unwrap().insert(name, value);
+    pub fn set(&mut self, name: String, tv: TypedValue) {
+        self.inner.last_mut().unwrap().insert(name, tv);
     }
 }

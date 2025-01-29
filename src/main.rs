@@ -12,12 +12,12 @@ fn main() {
 
     println!("{text}");
 
-    let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
+    let mut prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
 
     println!("{prog:#?}");
 
     let mut compiler = Compiler::new().unwrap();
-    let proc = compiler.compile(&prog).unwrap();
+    let proc = compiler.compile(&mut prog).unwrap();
 
     println!("result: {}", proc());
 }
