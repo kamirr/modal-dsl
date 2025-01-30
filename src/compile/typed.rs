@@ -1,5 +1,6 @@
 use cranelift::prelude::{
-    types::F32, FunctionBuilder, InstBuilder, StackSlotData, StackSlotKind, Value,
+    types::{F32, I64},
+    FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value,
 };
 use cranelift_codegen::ir::StackSlot;
 
@@ -29,6 +30,7 @@ impl TypedStackSlot {
 enum TypedValueImpl {
     Unit,
     Float(Value),
+    FloatRef(*const u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,6 +41,10 @@ impl TypedValue {
 
     pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> TypedValue {
         TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
+    }
+
+    pub unsafe fn float_ref(ptr: *mut u8) -> TypedValue {
+        TypedValue(TypedValueImpl::FloatRef(ptr))
     }
 
     pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> TypedValue {
@@ -124,10 +130,45 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
+    pub fn assign(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> anyhow::Result<TypedValue> {
+        let TypedValue(l) = self;
+        let TypedValue(r) = other;
+
+        let (TypedValueImpl::FloatRef(l), TypedValueImpl::Float(r)) = (l, r) else {
+            return Err(anyhow::Error::msg(format!(
+                "Assignement not defined for {self:?} {other:?}"
+            )));
+        };
+
+        let ptr = builder.ins().iconst(I64, l as i64);
+        builder.ins().store(MemFlags::trusted(), r, ptr, 0);
+
+        Ok(TypedValue::UNIT)
+    }
+
+    pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> TypedValue {
+        let TypedValue(tvi) = self;
+        TypedValue(match tvi {
+            TypedValueImpl::Float(v) => TypedValueImpl::Float(v),
+            TypedValueImpl::FloatRef(ptr) => {
+                let ptr = builder.ins().iconst(I64, ptr as i64);
+                TypedValueImpl::Float(builder.ins().load(F32, MemFlags::trusted(), ptr, 0))
+            }
+            TypedValueImpl::Unit => TypedValueImpl::Unit,
+        })
+    }
+
     pub fn inner(self) -> anyhow::Result<Value> {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Float(v) => Ok(v),
+            TypedValueImpl::FloatRef(_) => Err(anyhow::Error::msg(format!(
+                "{self:?} doesn't have a corresponding cranelift value"
+            ))),
             TypedValueImpl::Unit => Err(anyhow::Error::msg(format!(
                 "{self:?} doesn't have a corresponding cranelift value"
             ))),

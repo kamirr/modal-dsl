@@ -11,7 +11,7 @@ pub enum Item {
 
 impl Item {
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
-        State::parser()
+        State::parser(sample_rate)
             .padded()
             .map(Item::State)
             .or(Inputs::parser(sample_rate).padded().map(Item::Inputs))

@@ -8,6 +8,7 @@ pub enum BinopKind {
     Sub,
     Mul,
     Div,
+    Assign,
 }
 
 impl BinopKind {
@@ -21,6 +22,7 @@ impl BinopKind {
             BinopKind::Sub => "-",
             BinopKind::Mul => "*",
             BinopKind::Div => "/",
+            BinopKind::Assign => "=",
         }
     }
 }

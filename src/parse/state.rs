@@ -1,64 +1,62 @@
 use chumsky::{
     error::Simple,
-    prelude::{choice, just},
-    text::whitespace,
+    prelude::just,
+    text::{whitespace, TextParser},
     Parser,
 };
 
-use super::path::Ident;
+use super::{expr::Expr, path::Ident};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StateVarType {
     Float,
-    Buffer,
 }
 
 impl StateVarType {
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        choice((
-            just("float").to(StateVarType::Float),
-            just("buffer").to(StateVarType::Buffer),
-        ))
+        just("float").to(StateVarType::Float)
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StateEntry {
-    name: Ident,
-    ty: StateVarType,
+    pub name: Ident,
+    pub ty: StateVarType,
+    pub init: Expr,
 }
 
 impl StateEntry {
     #[cfg(test)]
-    pub fn new(name: impl Into<String>, ty: StateVarType) -> Self {
+    pub fn new(name: impl Into<String>, ty: StateVarType, init: Expr) -> Self {
         StateEntry {
             name: Ident::new(name),
             ty,
+            init,
         }
     }
 
-    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
         Ident::parser()
-            .then_ignore(whitespace())
-            .then_ignore(just(":"))
-            .then_ignore(whitespace())
+            .then_ignore(just(":").padded())
             .then(StateVarType::parser())
-            .map(|(name, ty)| StateEntry { name, ty })
+            .then_ignore(just("=").padded())
+            .then(Expr::parser(sample_rate))
+            .map(|((name, ty), init)| StateEntry { name, ty, init })
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct State(pub Vec<StateEntry>);
 
 impl State {
-    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
         just("state")
             .ignored()
             .then_ignore(whitespace())
             .then_ignore(just("{"))
             .then_ignore(whitespace())
             .then(
-                StateEntry::parser()
+                StateEntry::parser(sample_rate)
                     .then_ignore(whitespace())
                     .then(just(","))
                     .then_ignore(whitespace())
@@ -66,7 +64,7 @@ impl State {
                     .repeated(),
             )
             .map(|((), entries)| entries)
-            .then(StateEntry::parser().or_not())
+            .then(StateEntry::parser(sample_rate).or_not())
             .map(|(mut entries, last_entry)| {
                 if let Some(entry) = last_entry {
                     entries.push(entry);
@@ -81,14 +79,13 @@ impl State {
 
 #[cfg(test)]
 mod tests {
+    use crate::parse::literal::Literal;
+
     use super::*;
 
     #[test]
     fn test_state_var_type() {
-        let cases = [
-            ("float", StateVarType::Float),
-            ("buffer", StateVarType::Buffer),
-        ];
+        let cases = [("float", StateVarType::Float)];
 
         for (text, expected) in cases {
             assert_eq!(StateVarType::parser().parse(text), Ok(expected));
@@ -97,17 +94,16 @@ mod tests {
 
     #[test]
     fn test_state_entry() {
-        let cases = [
-            ("in:float", ("in", StateVarType::Float)),
-            ("buf : buffer", ("buf", StateVarType::Buffer)),
-        ];
+        let zero = Expr::Literal(Literal::Float(0.0));
+        let cases = [("in:float=0.0", ("in", StateVarType::Float, zero))];
 
-        for (text, (name, ty)) in cases {
+        for (text, (name, ty, init)) in cases {
             assert_eq!(
-                StateEntry::parser().parse(text),
+                StateEntry::parser(44100.0).parse(text),
                 Ok(StateEntry {
                     name: Ident::new(name),
-                    ty
+                    ty,
+                    init
                 })
             );
         }
@@ -115,26 +111,35 @@ mod tests {
 
     #[test]
     fn test_state() {
+        let zero = Expr::Literal(Literal::Float(0.0));
         let cases = [
             (
-                "state{in:float}",
-                State(vec![StateEntry::new("in", StateVarType::Float)]),
+                "state{in:float=0.0}",
+                State(vec![StateEntry::new(
+                    "in",
+                    StateVarType::Float,
+                    zero.clone(),
+                )]),
             ),
             (
-                "state{in:float,}",
-                State(vec![StateEntry::new("in", StateVarType::Float)]),
+                "state{in:float = 0.0,}",
+                State(vec![StateEntry::new(
+                    "in",
+                    StateVarType::Float,
+                    zero.clone(),
+                )]),
             ),
             (
-                "state{in:float,buf:buffer}",
+                "state{in:float = 0.0,in2:float=0.0}",
                 State(vec![
-                    StateEntry::new("in", StateVarType::Float),
-                    StateEntry::new("buf", StateVarType::Buffer),
+                    StateEntry::new("in", StateVarType::Float, zero.clone()),
+                    StateEntry::new("in2", StateVarType::Float, zero.clone()),
                 ]),
             ),
         ];
 
         for (text, expected) in cases {
-            assert_eq!(State::parser().parse(text), Ok(expected));
+            assert_eq!(State::parser(44100.0).parse(text), Ok(expected));
         }
     }
 }

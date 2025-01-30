@@ -12,12 +12,15 @@ fn main() {
 
     println!("{text}");
 
-    let mut prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
-
-    println!("{prog:#?}");
+    let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
 
     let mut compiler = Compiler::new().unwrap();
-    let proc = compiler.compile(&mut prog).unwrap();
+    let compiled = compiler.compile(&prog).unwrap();
 
-    println!("result: {}", proc());
+    println!("State mapping: {:#?}", compiled.state);
+
+    compiled.init();
+    for k in 0..12 {
+        println!("[{k:02}]: {}", compiled.step());
+    }
 }

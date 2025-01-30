@@ -1,5 +1,6 @@
 use chumsky::{error::Simple, text::TextParser, Parser};
 use item::Item;
+use state::State;
 use step::Step;
 
 pub mod binop;
@@ -49,6 +50,16 @@ impl Program {
                 items
             })
             .map(Program)
+    }
+
+    pub fn state(&self) -> &State {
+        self.0
+            .iter()
+            .find_map(|item| match item {
+                Item::State(state) => Some(state),
+                _ => None,
+            })
+            .unwrap()
     }
 
     pub fn step(&self) -> &Step {

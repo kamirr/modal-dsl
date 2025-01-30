@@ -17,14 +17,14 @@ use super::{
 pub struct Recursor<'fb, 'b, 'vs> {
     builder: &'fb mut FunctionBuilder<'b>,
     stack: &'vs mut VarStack,
-    retss: TypedStackSlot,
+    retss: Option<TypedStackSlot>,
 }
 
 impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
     pub fn new(
         builder: &'fb mut FunctionBuilder<'b>,
         stack: &'vs mut VarStack,
-        retss: TypedStackSlot,
+        retss: Option<TypedStackSlot>,
     ) -> Self {
         Recursor {
             builder,
@@ -58,20 +58,34 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 }
             }
             Expr::Binop(Binop { left, right, op }) => {
-                let l = self.recurse(left);
-                let r = self.recurse(right);
+                use BinopKind::*;
+
+                let mut l = self.recurse(left);
+                let mut r = self.recurse(right);
+
+                if matches!(op, Add | Sub | Mul | Div) {
+                    l = l.autoderef(self.builder);
+                    r = r.autoderef(self.builder);
+                }
 
                 match op {
-                    BinopKind::Add => l.add(self.builder, r),
-                    BinopKind::Sub => l.sub(self.builder, r),
-                    BinopKind::Mul => l.mul(self.builder, r),
-                    BinopKind::Div => l.div(self.builder, r),
+                    Add => l.add(self.builder, r),
+                    Sub => l.sub(self.builder, r),
+                    Mul => l.mul(self.builder, r),
+                    Div => l.div(self.builder, r),
+                    Assign => l.assign(self.builder, r),
                 }
                 .unwrap()
             }
             Expr::Yield(Yield { value }) => {
+                let Some(retss) = self.retss else {
+                    panic!("retss not provided")
+                };
+
                 let tv = self.recurse(value);
-                tv.stack_store(self.builder, self.retss).unwrap()
+                tv.autoderef(self.builder)
+                    .stack_store(self.builder, retss)
+                    .unwrap()
             }
             _ => todo!(),
         }
