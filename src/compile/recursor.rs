@@ -63,9 +63,14 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let mut l = self.recurse(left);
                 let mut r = self.recurse(right);
 
-                if matches!(op, Add | Sub | Mul | Div) {
-                    l = l.autoderef(self.builder);
-                    r = r.autoderef(self.builder);
+                match op {
+                    Add | Sub | Mul | Div => {
+                        l = l.autoderef(self.builder);
+                        r = r.autoderef(self.builder);
+                    }
+                    Assign => {
+                        r = r.autoderef(self.builder);
+                    }
                 }
 
                 match op {
