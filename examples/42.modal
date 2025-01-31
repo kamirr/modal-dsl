@@ -6,6 +6,6 @@ step {
     yield {
         let ones = 2;
 
-        tens * 10 + ones
+        { ( { ( { ( tens * 10 + ones ) } ) } ) }
     };
 }

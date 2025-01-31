@@ -25,6 +25,14 @@ impl BinopKind {
             BinopKind::Assign => "=",
         }
     }
+
+    pub fn apply(self, lhs: Expr, rhs: Expr) -> Binop {
+        Binop {
+            left: Box::new(lhs),
+            right: Box::new(rhs),
+            op: self,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

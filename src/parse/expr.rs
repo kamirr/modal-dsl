@@ -43,41 +43,37 @@ impl Expr {
 
             let product = atom
                 .clone()
-                .then(choice((BinopKind::Mul.parser(), BinopKind::Div.parser())))
-                .then(atom.clone())
-                .map(|((left, op), right)| {
-                    Expr::Binop(Binop {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                        op,
-                    })
-                })
-                .or(atom.clone());
+                .then(
+                    choice((BinopKind::Mul.parser(), BinopKind::Div.parser()))
+                        .then(atom.clone())
+                        .repeated(),
+                )
+                .map(|(lhs, seq)| {
+                    seq.into_iter()
+                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                });
 
             let sum = product
                 .clone()
-                .then(choice((BinopKind::Add.parser(), BinopKind::Sub.parser())))
-                .then(product.clone())
-                .map(|((left, op), right)| {
-                    Expr::Binop(Binop {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                        op,
-                    })
-                })
-                .or(product);
+                .then(
+                    choice((BinopKind::Add.parser(), BinopKind::Sub.parser()))
+                        .then(product.clone())
+                        .repeated(),
+                )
+                .map(|(lhs, seq)| {
+                    seq.into_iter()
+                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                });
 
-            sum.clone()
-                .then(BinopKind::Assign.parser())
-                .then(sum.clone())
-                .map(|((left, op), right)| {
-                    Expr::Binop(Binop {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                        op,
-                    })
-                })
-                .or(sum)
+            let assign = sum
+                .clone()
+                .then(BinopKind::Assign.parser().then(sum.clone()).repeated())
+                .map(|(lhs, seq)| {
+                    seq.into_iter()
+                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                });
+
+            assign
         })
     }
 }
