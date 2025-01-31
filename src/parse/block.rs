@@ -59,9 +59,10 @@ mod tests {
             (
                 "{yield 2.0;}",
                 Block {
-                    exprs: vec![Expr::Yield(Yield {
+                    exprs: vec![Yield {
                         value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                    })],
+                    }
+                    .into()],
                     ret_last: false,
                 },
             ),
@@ -69,21 +70,24 @@ mod tests {
                 " { let two = 2; let three = 3e1; yield two / three; two } ",
                 Block {
                     exprs: vec![
-                        Expr::Let(Let {
+                        Let {
                             name: Ident::new("two"),
                             value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                        }),
-                        Expr::Let(Let {
+                        }
+                        .into(),
+                        Let {
                             name: Ident::new("three"),
                             value: Box::new(Expr::Literal(Literal::Float(30.0))),
-                        }),
-                        Expr::Yield(Yield {
+                        }
+                        .into(),
+                        Yield {
                             value: Box::new(Expr::Binop(Binop {
                                 left: Box::new(Expr::Var(Var::new("two"))),
                                 right: Box::new(Expr::Var(Var::new("three"))),
                                 op: BinopKind::Div,
                             })),
-                        }),
+                        }
+                        .into(),
                         Expr::Var(Var::new("two")),
                     ],
                     ret_last: true,

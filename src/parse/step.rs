@@ -52,9 +52,10 @@ mod tests {
             (
                 "step{yield 2.0;}",
                 Step(Block {
-                    exprs: vec![Expr::Yield(Yield {
+                    exprs: vec![Yield {
                         value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                    })],
+                    }
+                    .into()],
                     ret_last: false,
                 }),
             ),
@@ -62,21 +63,27 @@ mod tests {
                 "step { let two = 2; let three = 3e1; yield two / three; } ",
                 Step(Block {
                     exprs: vec![
-                        Expr::Let(Let {
+                        Let {
                             name: Ident::new("two"),
                             value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                        }),
-                        Expr::Let(Let {
+                        }
+                        .into(),
+                        Let {
                             name: Ident::new("three"),
                             value: Box::new(Expr::Literal(Literal::Float(30.0))),
-                        }),
-                        Expr::Yield(Yield {
-                            value: Box::new(Expr::Binop(Binop {
-                                left: Box::new(Expr::Var(Var::new("two"))),
-                                right: Box::new(Expr::Var(Var::new("three"))),
-                                op: BinopKind::Div,
-                            })),
-                        }),
+                        }
+                        .into(),
+                        Yield {
+                            value: Box::new(
+                                Binop {
+                                    left: Box::new(Var::new("two").into()),
+                                    right: Box::new(Var::new("three").into()),
+                                    op: BinopKind::Div,
+                                }
+                                .into(),
+                            ),
+                        }
+                        .into(),
                     ],
                     ret_last: false,
                 }),

@@ -5,6 +5,7 @@ use chumsky::{
     text::TextParser,
     Parser,
 };
+use derive_more::derive::From;
 
 use super::{
     binop::{Binop, BinopKind},
@@ -16,7 +17,7 @@ use super::{
     yield_::Yield,
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, From)]
 pub enum Expr {
     Block(Block),
     Call(Call),
@@ -50,7 +51,7 @@ impl Expr {
                 )
                 .map(|(lhs, seq)| {
                     seq.into_iter()
-                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                        .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
                 });
 
             let sum = product
@@ -62,7 +63,7 @@ impl Expr {
                 )
                 .map(|(lhs, seq)| {
                     seq.into_iter()
-                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                        .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
                 });
 
             let assign = sum
@@ -70,7 +71,7 @@ impl Expr {
                 .then(BinopKind::Assign.parser().then(sum.clone()).repeated())
                 .map(|(lhs, seq)| {
                     seq.into_iter()
-                        .fold(lhs, |lhs, (op, rhs)| Expr::Binop(op.apply(lhs, rhs)))
+                        .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
                 });
 
             assign
@@ -90,7 +91,7 @@ mod tests {
         for (text, expected) in cases {
             assert_eq!(
                 Expr::parser(44100.0).parse(text),
-                Ok(Expr::Var(Var { name: expected }))
+                Ok(Var { name: expected }.into())
             )
         }
     }
@@ -101,7 +102,7 @@ mod tests {
             "let foo = 4",
             Let {
                 name: Ident::new("foo"),
-                value: Box::new(Expr::Literal(Literal::Float(4.0))),
+                value: Box::new(Literal::Float(4.0).into()),
             },
         )];
 
@@ -115,9 +116,12 @@ mod tests {
         let cases = [(
             "yield foo",
             Yield {
-                value: Box::new(Expr::Var(Var {
-                    name: Ident::new("foo"),
-                })),
+                value: Box::new(
+                    Var {
+                        name: Ident::new("foo"),
+                    }
+                    .into(),
+                ),
             },
         )];
 
@@ -132,26 +136,35 @@ mod tests {
             (
                 &["2 + 3 * 4", "2+3*4", "2 + ( 3 * 4)"][..],
                 Binop {
-                    left: Box::new(Expr::Literal(Literal::Float(2.0))),
-                    right: Box::new(Expr::Binop(Binop {
-                        left: Box::new(Expr::Literal(Literal::Float(3.0))),
-                        right: Box::new(Expr::Literal(Literal::Float(4.0))),
-                        op: BinopKind::Mul,
-                    })),
+                    left: Box::new(Literal::Float(2.0).into()),
+                    right: Box::new(
+                        Binop {
+                            left: Box::new(Literal::Float(3.0).into()),
+                            right: Box::new(Literal::Float(4.0).into()),
+                            op: BinopKind::Mul,
+                        }
+                        .into(),
+                    ),
                     op: BinopKind::Add,
                 },
             ),
             (
                 &["2 * 3 + x"],
                 Binop {
-                    left: Box::new(Expr::Binop(Binop {
-                        left: Box::new(Expr::Literal(Literal::Float(2.0))),
-                        right: Box::new(Expr::Literal(Literal::Float(3.0))),
-                        op: BinopKind::Mul,
-                    })),
-                    right: Box::new(Expr::Var(Var {
-                        name: Ident::new("x"),
-                    })),
+                    left: Box::new(
+                        Binop {
+                            left: Box::new(Literal::Float(2.0).into()),
+                            right: Box::new(Literal::Float(3.0).into()),
+                            op: BinopKind::Mul,
+                        }
+                        .into(),
+                    ),
+                    right: Box::new(
+                        Var {
+                            name: Ident::new("x"),
+                        }
+                        .into(),
+                    ),
                     op: BinopKind::Add,
                 },
             ),
@@ -161,7 +174,7 @@ mod tests {
             for text in texts {
                 assert_eq!(
                     Expr::parser(44100.0).parse(*text),
-                    Ok(Expr::Binop(expected.clone()))
+                    Ok(expected.clone().into())
                 )
             }
         }

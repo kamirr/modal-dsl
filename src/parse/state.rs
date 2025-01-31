@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_state() {
-        let zero = Expr::Literal(Literal::Float(0.0));
+        let zero: Expr = Literal::Float(0.0).into();
         let cases = [
             (
                 "state{in=0.0}",
