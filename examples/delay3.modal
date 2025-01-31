@@ -1,0 +1,16 @@
+state {
+    y0 = 0,
+    y1 = 0,
+    y2 = 0,
+}
+
+inputs {
+    in: sig,
+}
+
+step {
+    yield y0;
+    y0 = y1;
+    y1 = y2;
+    y2 = in;
+}

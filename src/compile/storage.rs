@@ -7,15 +7,15 @@ use std::{
 use super::typed::TypedValue;
 
 #[derive(Debug)]
-pub struct StateStorage {
+pub struct StorageBuf {
     ptr: NonNull<u8>,
     len: usize,
 }
 
-impl StateStorage {
-    pub fn new(len: usize) -> StateStorage {
+impl StorageBuf {
+    pub fn new(len: usize) -> StorageBuf {
         if len == 0 {
-            StateStorage {
+            StorageBuf {
                 ptr: NonNull::dangling(),
                 len: 0,
             }
@@ -27,7 +27,7 @@ impl StateStorage {
                 ptr
             };
 
-            StateStorage {
+            StorageBuf {
                 ptr: NonNull::new(ptr).unwrap(),
                 len,
             }
@@ -43,7 +43,7 @@ impl StateStorage {
     }
 }
 
-impl Drop for StateStorage {
+impl Drop for StorageBuf {
     fn drop(&mut self) {
         if self.ptr != NonNull::dangling() {
             unsafe {
@@ -61,7 +61,7 @@ pub struct MappedStorage {
     mapping: HashMap<String, TypedValue>,
     // storage is here to keep it alive
     #[allow(dead_code)]
-    storage: StateStorage,
+    storage: StorageBuf,
 }
 
 impl MappedStorage {
@@ -70,7 +70,7 @@ impl MappedStorage {
     /// SAFETY:
     /// Mapping must correctly describe pointers of state variables pointing to
     /// within the storage. [`StateStorage`] must have the correct size.
-    pub unsafe fn new(mapping: HashMap<String, TypedValue>, storage: StateStorage) -> Self {
+    pub unsafe fn new(mapping: HashMap<String, TypedValue>, storage: StorageBuf) -> Self {
         MappedStorage { mapping, storage }
     }
 

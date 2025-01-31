@@ -30,7 +30,7 @@ impl TypedStackSlot {
 enum TypedValueImpl {
     Unit,
     Float(Value),
-    FloatRef(*const u8),
+    FloatRef(*mut u8),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,6 +49,14 @@ impl TypedValue {
             TypedValueImpl::Float(_) => TypedValueImpl::FloatRef(ptr),
             TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => panic!(),
         })
+    }
+
+    pub fn as_ptr(self) -> *mut u8 {
+        let TypedValue(tvi) = self;
+        match tvi {
+            TypedValueImpl::FloatRef(ptr) => ptr,
+            TypedValueImpl::Float(_) | TypedValueImpl::Unit => panic!(),
+        }
     }
 
     pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> TypedValue {

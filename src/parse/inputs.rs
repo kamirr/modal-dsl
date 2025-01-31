@@ -26,9 +26,9 @@ impl InputType {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputEntry {
-    name: Ident,
-    ty: InputType,
-    default: Option<Literal>,
+    pub name: Ident,
+    pub ty: InputType,
+    pub default: Option<Literal>,
 }
 
 impl InputEntry {

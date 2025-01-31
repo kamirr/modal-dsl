@@ -1,4 +1,5 @@
 use chumsky::{error::Simple, text::TextParser, Parser};
+use inputs::Inputs;
 use item::Item;
 use state::State;
 use step::Step;
@@ -57,6 +58,16 @@ impl Program {
             .iter()
             .find_map(|item| match item {
                 Item::State(state) => Some(state),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    pub fn inputs(&self) -> &Inputs {
+        self.0
+            .iter()
+            .find_map(|item| match item {
+                Item::Inputs(inputs) => Some(inputs),
                 _ => None,
             })
             .unwrap()
