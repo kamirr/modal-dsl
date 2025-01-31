@@ -4,7 +4,7 @@ use std::{
     ptr::NonNull,
 };
 
-use crate::parse::state::StateVarType;
+use super::typed::TypedValue;
 
 #[derive(Debug)]
 pub struct StateStorage {
@@ -38,7 +38,7 @@ impl StateStorage {
     ///
     /// SAFETY:
     /// Offset must point into a valid state variable
-    unsafe fn get(&self, offset: usize) -> NonNull<u8> {
+    pub unsafe fn get(&self, offset: usize) -> NonNull<u8> {
         self.ptr.add(offset)
     }
 }
@@ -58,7 +58,9 @@ impl Drop for StateStorage {
 
 #[derive(Debug)]
 pub struct MappedStorage {
-    mapping: HashMap<String, (StateVarType, usize)>,
+    mapping: HashMap<String, TypedValue>,
+    // storage is here to keep it alive
+    #[allow(dead_code)]
     storage: StateStorage,
 }
 
@@ -66,19 +68,13 @@ impl MappedStorage {
     /// Construct mapped storage
     ///
     /// SAFETY:
-    /// Mapping must correctly describe offsets of state variable allocations
+    /// Mapping must correctly describe pointers of state variables pointing to
     /// within the storage. [`StateStorage`] must have the correct size.
-    pub unsafe fn new(
-        mapping: HashMap<String, (StateVarType, usize)>,
-        storage: StateStorage,
-    ) -> Self {
+    pub unsafe fn new(mapping: HashMap<String, TypedValue>, storage: StateStorage) -> Self {
         MappedStorage { mapping, storage }
     }
 
-    pub fn get(&self, name: &str) -> Option<(StateVarType, NonNull<u8>)> {
-        let (ty, offset) = *self.mapping.get(name)?;
-        let var_ptr = unsafe { self.storage.get(offset) };
-
-        Some((ty, var_ptr))
+    pub fn iter(&self) -> impl Iterator<Item = (&str, TypedValue)> {
+        self.mapping.iter().map(|(s, tv)| (s.as_str(), *tv))
     }
 }

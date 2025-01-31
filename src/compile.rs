@@ -18,10 +18,7 @@ use state_storage::{MappedStorage, StateStorage};
 use typed::{TypedStackSlot, TypedValue};
 use varstack::VarStack;
 
-use crate::parse::{
-    state::{State, StateEntry, StateVarType},
-    Program,
-};
+use crate::parse::{state::StateEntry, Program};
 
 pub struct CompiledProgram {
     #[allow(dead_code)]
@@ -71,9 +68,9 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: &Program) -> anyhow::Result<CompiledProgram> {
-        let mapped_storage = Arc::new(self.build_state_storage(program.state()));
+        let (init, mapped_storage) = self.build_init(program)?;
 
-        let init = self.build_init(program, Arc::clone(&mapped_storage))?;
+        let mapped_storage = Arc::new(mapped_storage);
         let step = self.build_step(program, Arc::clone(&mapped_storage))?;
 
         Ok(CompiledProgram {
@@ -83,11 +80,7 @@ impl Compiler {
         })
     }
 
-    fn build_init(
-        &mut self,
-        program: &Program,
-        mapped_storage: Arc<MappedStorage>,
-    ) -> anyhow::Result<fn()> {
+    fn build_init(&mut self, program: &Program) -> anyhow::Result<(fn(), MappedStorage)> {
         self.module_ctx.func.signature.params = vec![];
         self.module_ctx.func.signature.returns = vec![];
 
@@ -106,15 +99,22 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        for StateEntry { name, ty, init } in &program.state().0 {
-            assert!(matches!(ty, StateVarType::Float));
-
-            let mut stack = VarStack::new(Arc::clone(&mapped_storage));
+        let mut state_tvs = Vec::<(String, TypedValue)>::new();
+        for StateEntry { name, init } in &program.state().0 {
+            let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
             let init_v = recursor.recurse(init);
-            let ptr = stack.get(&name.0).unwrap();
-            ptr.assign(&mut builder, init_v).unwrap();
+            state_tvs.push((name.0.clone(), init_v));
+        }
+        let mapped_storage = Self::build_state_storage(&state_tvs)?;
+
+        for (name, ptr_v) in mapped_storage.iter() {
+            let init_v = state_tvs
+                .iter()
+                .find_map(|(id, init_v)| (id == name).then_some(*init_v))
+                .unwrap();
+            ptr_v.assign(&mut builder, init_v).unwrap();
         }
 
         builder.ins().return_(&[]);
@@ -131,7 +131,7 @@ impl Compiler {
 
         let func = unsafe { std::mem::transmute::<*const u8, fn()>(code) };
 
-        Ok(func)
+        Ok((func, mapped_storage))
     }
 
     fn build_step(
@@ -157,7 +157,11 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        let mut stack = VarStack::new(mapped_storage);
+        let mut stack = VarStack::new();
+        for (name, ref_tv) in mapped_storage.iter() {
+            stack.set(name.to_string(), ref_tv);
+        }
+
         let retss = TypedStackSlot::float()(&mut builder);
 
         let mut recursor = Recursor::new(&mut builder, &mut stack, Some(retss));
@@ -183,20 +187,22 @@ impl Compiler {
         Ok(func)
     }
 
-    fn build_state_storage(&mut self, state: &State) -> MappedStorage {
+    fn build_state_storage(entries: &[(String, TypedValue)]) -> anyhow::Result<MappedStorage> {
         let mut offset = 0usize;
         let mut state_mapping = HashMap::new();
+        let mut offsets = HashMap::new();
 
-        for entry in &state.0 {
-            let (size, align) = match entry.ty {
-                StateVarType::Float => (4, 4),
-            };
+        for (name, tv) in entries {
+            let abi_type = tv.cl_type()?;
+
+            // Assumption that align is the same as size is overly restrictive
+            let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
 
             if offset % align != 0 {
                 offset = offset.next_multiple_of(align);
             }
 
-            state_mapping.insert(entry.name.0.clone(), (entry.ty, offset));
+            offsets.insert(name.clone(), offset);
 
             offset += size;
         }
@@ -204,7 +210,14 @@ impl Compiler {
         let storage_len = offset;
         let storage = StateStorage::new(storage_len);
 
+        for (name, tv) in entries {
+            let offset = offsets.get(name).unwrap();
+            state_mapping.insert(name.clone(), unsafe {
+                tv.ref_this(storage.get(*offset).as_ptr())
+            });
+        }
+
         // See MappedStorage::new invariants
-        unsafe { MappedStorage::new(state_mapping, storage) }
+        Ok(unsafe { MappedStorage::new(state_mapping, storage) })
     }
 }

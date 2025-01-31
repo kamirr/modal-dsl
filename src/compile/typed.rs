@@ -1,6 +1,6 @@
 use cranelift::prelude::{
     types::{F32, I64},
-    FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Value,
+    FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type, Value,
 };
 use cranelift_codegen::ir::StackSlot;
 
@@ -43,8 +43,12 @@ impl TypedValue {
         TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
     }
 
-    pub unsafe fn float_ref(ptr: *mut u8) -> TypedValue {
-        TypedValue(TypedValueImpl::FloatRef(ptr))
+    pub unsafe fn ref_this(self, ptr: *mut u8) -> TypedValue {
+        let TypedValue(tvi) = self;
+        TypedValue(match tvi {
+            TypedValueImpl::Float(_) => TypedValueImpl::FloatRef(ptr),
+            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => panic!(),
+        })
     }
 
     pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> TypedValue {
@@ -171,6 +175,19 @@ impl TypedValue {
             ))),
             TypedValueImpl::Unit => Err(anyhow::Error::msg(format!(
                 "{self:?} doesn't have a corresponding cranelift value"
+            ))),
+        }
+    }
+
+    pub fn cl_type(self) -> anyhow::Result<Type> {
+        let TypedValue(tvi) = self;
+        match tvi {
+            TypedValueImpl::Float(_) => Ok(F32),
+            TypedValueImpl::FloatRef(_) => Err(anyhow::Error::msg(format!(
+                "{self:?} doesn't have a corresponding cranelift type"
+            ))),
+            TypedValueImpl::Unit => Err(anyhow::Error::msg(format!(
+                "{self:?} doesn't have a corresponding cranelift type"
             ))),
         }
     }

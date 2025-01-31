@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use chumsky::Parser;
 use compile::Compiler;
 use parse::Program;
@@ -12,10 +14,17 @@ fn main() {
 
     println!("{text}");
 
+    let now = Instant::now();
     let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
+    println!("parsing took {:.2}ms", now.elapsed().as_secs_f32() * 1000.0);
 
+    let now = Instant::now();
     let mut compiler = Compiler::new().unwrap();
     let compiled = compiler.compile(&prog).unwrap();
+    println!(
+        "compilation took {:.2}ms",
+        now.elapsed().as_secs_f32() * 1000.0
+    );
 
     println!("State mapping: {:#?}", compiled.state);
 

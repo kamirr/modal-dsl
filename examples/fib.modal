@@ -1,6 +1,6 @@
 state {
-    a: float = 1,
-    b: float = 1
+    a = 1,
+    b = 1
 }
 
 inputs { }

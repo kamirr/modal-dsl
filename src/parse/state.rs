@@ -7,41 +7,26 @@ use chumsky::{
 
 use super::{expr::Expr, path::Ident};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StateVarType {
-    Float,
-}
-
-impl StateVarType {
-    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        just("float").to(StateVarType::Float)
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct StateEntry {
     pub name: Ident,
-    pub ty: StateVarType,
     pub init: Expr,
 }
 
 impl StateEntry {
     #[cfg(test)]
-    pub fn new(name: impl Into<String>, ty: StateVarType, init: Expr) -> Self {
+    pub fn new(name: impl Into<String>, init: Expr) -> Self {
         StateEntry {
             name: Ident::new(name),
-            ty,
             init,
         }
     }
 
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
         Ident::parser()
-            .then_ignore(just(":").padded())
-            .then(StateVarType::parser())
             .then_ignore(just("=").padded())
             .then(Expr::parser(sample_rate))
-            .map(|((name, ty), init)| StateEntry { name, ty, init })
+            .map(|(name, init)| StateEntry { name, init })
     }
 }
 
@@ -84,25 +69,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_state_var_type() {
-        let cases = [("float", StateVarType::Float)];
-
-        for (text, expected) in cases {
-            assert_eq!(StateVarType::parser().parse(text), Ok(expected));
-        }
-    }
-
-    #[test]
     fn test_state_entry() {
         let zero = Expr::Literal(Literal::Float(0.0));
-        let cases = [("in:float=0.0", ("in", StateVarType::Float, zero))];
+        let cases = [("in=0.0", ("in", zero))];
 
-        for (text, (name, ty, init)) in cases {
+        for (text, (name, init)) in cases {
             assert_eq!(
                 StateEntry::parser(44100.0).parse(text),
                 Ok(StateEntry {
                     name: Ident::new(name),
-                    ty,
+
                     init
                 })
             );
@@ -114,26 +90,18 @@ mod tests {
         let zero = Expr::Literal(Literal::Float(0.0));
         let cases = [
             (
-                "state{in:float=0.0}",
-                State(vec![StateEntry::new(
-                    "in",
-                    StateVarType::Float,
-                    zero.clone(),
-                )]),
+                "state{in=0.0}",
+                State(vec![StateEntry::new("in", zero.clone())]),
             ),
             (
-                "state{in:float = 0.0,}",
-                State(vec![StateEntry::new(
-                    "in",
-                    StateVarType::Float,
-                    zero.clone(),
-                )]),
+                "state{in = 0.0,}",
+                State(vec![StateEntry::new("in", zero.clone())]),
             ),
             (
-                "state{in:float = 0.0,in2:float=0.0}",
+                "state{in = 0.0,in2=0.0}",
                 State(vec![
-                    StateEntry::new("in", StateVarType::Float, zero.clone()),
-                    StateEntry::new("in2", StateVarType::Float, zero.clone()),
+                    StateEntry::new("in", zero.clone()),
+                    StateEntry::new("in2", zero.clone()),
                 ]),
             ),
         ];

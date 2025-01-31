@@ -21,12 +21,7 @@ impl Block {
             .padded()
             .ignored()
             .then(expr.clone().then_ignore(just(";").padded()).repeated())
-            .then(
-                expr.clone()
-                    .then(just(";").padded().or_not())
-                    .padded()
-                    .or_not(),
-            )
+            .then(expr.then(just(";").padded().or_not()).padded().or_not())
             .then_ignore(just("}").padded())
             .map(|(((), mut exprs), last)| {
                 if let Some((last, semicolon)) = last {
