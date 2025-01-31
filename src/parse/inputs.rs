@@ -1,39 +1,22 @@
 use chumsky::{
     error::Simple,
-    prelude::{choice, just},
-    text::whitespace,
+    prelude::just,
+    text::{ident, whitespace},
     Parser,
 };
 
 use super::{literal::Literal, path::Ident};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum InputType {
-    Sig,
-    Percentage,
-    Time,
-}
-
-impl InputType {
-    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        choice((
-            just("sig").to(InputType::Sig),
-            just("percentage").to(InputType::Percentage),
-            just("time").to(InputType::Time),
-        ))
-    }
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputEntry {
     pub name: Ident,
-    pub ty: InputType,
+    pub ty: String,
     pub default: Option<Literal>,
 }
 
 impl InputEntry {
     #[cfg(test)]
-    pub fn new(name: impl Into<String>, ty: InputType, default: Option<Literal>) -> Self {
+    pub fn new(name: impl Into<String>, ty: String, default: Option<Literal>) -> Self {
         InputEntry {
             name: Ident::new(name),
             ty,
@@ -46,7 +29,7 @@ impl InputEntry {
             .then_ignore(whitespace())
             .then_ignore(just(":"))
             .then_ignore(whitespace())
-            .then(InputType::parser())
+            .then(ident())
             .then(
                 whitespace()
                     .ignored()
@@ -97,31 +80,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_input_type() {
-        let cases = [
-            ("sig", InputType::Sig),
-            ("percentage", InputType::Percentage),
-            ("time", InputType::Time),
-        ];
-
-        for (text, expected) in cases {
-            assert_eq!(InputType::parser().parse(text), Ok(expected));
-        }
-    }
-
-    #[test]
     fn test_input_entry() {
         let cases = [
-            ("foo:sig", InputEntry::new("foo", InputType::Sig, None)),
+            ("foo:sig", InputEntry::new("foo", "sig".into(), None)),
             (
                 "foo: percentage=3%",
-                InputEntry::new("foo", InputType::Percentage, Some(Literal::Float(0.03))),
+                InputEntry::new("foo", "percentage".into(), Some(Literal::Float(0.03))),
             ),
             (
                 "delay: time = 24ms",
                 InputEntry::new(
                     "delay",
-                    InputType::Time,
+                    "time".into(),
                     Some(Literal::Float(24.0 * 44100.0 / 1000.0)),
                 ),
             ),
@@ -137,18 +107,18 @@ mod tests {
         let cases = [
             (
                 "inputs{x:sig}",
-                Inputs(vec![InputEntry::new("x", InputType::Sig, None)]),
+                Inputs(vec![InputEntry::new("x", "sig".into(), None)]),
             ),
             (
                 "inputs{x:sig,}",
-                Inputs(vec![InputEntry::new("x", InputType::Sig, None)]),
+                Inputs(vec![InputEntry::new("x", "sig".into(), None)]),
             ),
             (
                 "inputs{\ns:sig,\n feedback:percentage = 20% ,\ndelay : time = 20ms,}",
                 Inputs(vec![
-                    InputEntry::new("s", InputType::Sig, None),
-                    InputEntry::new("feedback", InputType::Percentage, Some(Literal::Float(0.2))),
-                    InputEntry::new("delay", InputType::Time, Some(Literal::Float(882.0))),
+                    InputEntry::new("s", "sig".into(), None),
+                    InputEntry::new("feedback", "percentage".into(), Some(Literal::Float(0.2))),
+                    InputEntry::new("delay", "time".into(), Some(Literal::Float(882.0))),
                 ]),
             ),
         ];
