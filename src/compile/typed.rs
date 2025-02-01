@@ -159,7 +159,7 @@ impl TypedValue {
         let ptr = builder.ins().iconst(I64, l as i64);
         builder.ins().store(MemFlags::trusted(), r, ptr, 0);
 
-        Ok(TypedValue::UNIT)
+        Ok(other)
     }
 
     pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> TypedValue {

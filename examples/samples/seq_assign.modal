@@ -1,0 +1,12 @@
+state {
+    a = 0,
+    b = 1,
+    c = 2,
+    d = 3,
+}
+inputs { }
+
+step {
+    a = b = c = d;
+    yield a;
+}

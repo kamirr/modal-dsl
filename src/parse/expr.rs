@@ -54,7 +54,8 @@ impl Expr {
                 .map(|(lhs, seq)| {
                     seq.into_iter()
                         .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
-                });
+                })
+                .boxed();
 
             let sum = product
                 .clone()
@@ -66,15 +67,35 @@ impl Expr {
                 .map(|(lhs, seq)| {
                     seq.into_iter()
                         .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
-                });
+                })
+                .boxed();
 
             let assign = sum
                 .clone()
-                .then(BinopKind::Assign.parser().then(sum.clone()).repeated())
-                .map(|(lhs, seq)| {
-                    seq.into_iter()
-                        .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
-                });
+                .then(
+                    BinopKind::Assign
+                        .parser()
+                        .then(sum.clone())
+                        .map(|(_op, rhs)| rhs)
+                        .repeated(),
+                )
+                .map(|(lhs, mut seq)| {
+                    seq.insert(0, lhs);
+                    if seq.len() == 1 {
+                        seq.pop().unwrap()
+                    } else {
+                        let rhs = seq.pop().unwrap();
+                        let lhs = seq.pop().unwrap();
+                        let mut expr = BinopKind::Assign.apply(lhs, rhs).into();
+
+                        while let Some(lhs) = seq.pop() {
+                            expr = BinopKind::Assign.apply(lhs, expr).into();
+                        }
+
+                        expr.into()
+                    }
+                })
+                .boxed();
 
             assign
         })
