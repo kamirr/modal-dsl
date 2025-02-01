@@ -79,21 +79,10 @@ impl Expr {
                         .map(|(_op, rhs)| rhs)
                         .repeated(),
                 )
-                .map(|(lhs, mut seq)| {
-                    seq.insert(0, lhs);
-                    if seq.len() == 1 {
-                        seq.pop().unwrap()
-                    } else {
-                        let rhs = seq.pop().unwrap();
-                        let lhs = seq.pop().unwrap();
-                        let mut expr = BinopKind::Assign.apply(lhs, rhs).into();
-
-                        while let Some(lhs) = seq.pop() {
-                            expr = BinopKind::Assign.apply(lhs, expr).into();
-                        }
-
-                        expr.into()
-                    }
+                .map(|(lhs, seq)| seq.into_iter().rev().chain(std::iter::once(lhs)))
+                .map(|mut seq| {
+                    let rhs = seq.next().unwrap();
+                    seq.fold(rhs, |rhs, lhs| BinopKind::Assign.apply(lhs, rhs).into())
                 })
                 .boxed();
 
