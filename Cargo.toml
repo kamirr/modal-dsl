@@ -15,6 +15,7 @@ derive_more = { version = "1.0.0", features = ["from"] }
 
 [dev-dependencies]
 ariadne = "0.5.0"
+pretty_assertions = "1.4.1"
 
 [profile.release]
 debug = true

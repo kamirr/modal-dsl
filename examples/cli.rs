@@ -16,6 +16,9 @@ fn main() {
     let now = Instant::now();
     let (program, errs) = Program::parser(44100.0).parse_recovery(src.clone());
     report_errors(&errs, &src);
+    if errs.len() > 0 {
+        return;
+    }
 
     println!("parsing took {:.2}ms", now.elapsed().as_secs_f32() * 1000.0);
 

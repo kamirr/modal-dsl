@@ -1,9 +1,14 @@
+use std::ops::Range;
+
 use chumsky::{error::Simple, prelude::just, text::whitespace, Parser};
 
 use super::{block::Block, expr::Expr};
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Step(pub Block);
+pub struct Step {
+    pub block: Block,
+    pub span: Range<usize>,
+}
 
 impl Step {
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
@@ -14,21 +19,20 @@ impl Step {
             .map(|((), blk)| blk)
             .try_map(|expr, span| {
                 if let Expr::Block(blk) = expr {
-                    Ok(blk)
+                    Ok(Step { block: blk, span })
                 } else {
                     Err(Simple::custom(span, "Main step expression must be a block"))
                 }
             })
-            .validate(|blk, span, emit| {
-                if blk.ret_last {
+            .validate(|step, span, emit| {
+                if step.block.ret_last {
                     emit(Simple::custom(
                         span,
                         "Main block of step cannot omit the last semicolon",
                     ));
                 }
-                blk
+                step
             })
-            .map(Step)
     }
 }
 
@@ -36,57 +40,90 @@ impl Step {
 mod tests {
     use crate::parse::{
         binop::{Binop, BinopKind},
-        expr::Expr,
         let_::Let,
-        literal::Literal,
+        literal::{Literal, LiteralValue},
         path::Ident,
         var::Var,
         yield_::Yield,
     };
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
     #[test]
-    fn test_state() {
+    fn test_step() {
         let cases = [
             (
                 "step{yield 2.0;}",
-                Step(Block {
-                    exprs: vec![Yield {
-                        value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                    }
-                    .into()],
-                    ret_last: false,
-                }),
-            ),
-            (
-                "step { let two = 2; let three = 3e1; yield two / three; } ",
-                Step(Block {
-                    exprs: vec![
-                        Let {
-                            name: Ident::new("two"),
-                            value: Box::new(Expr::Literal(Literal::Float(2.0))),
-                        }
-                        .into(),
-                        Let {
-                            name: Ident::new("three"),
-                            value: Box::new(Expr::Literal(Literal::Float(30.0))),
-                        }
-                        .into(),
-                        Yield {
+                Step {
+                    block: Block {
+                        exprs: vec![Yield {
                             value: Box::new(
-                                Binop {
-                                    left: Box::new(Var::new("two").into()),
-                                    right: Box::new(Var::new("three").into()),
-                                    op: BinopKind::Div,
+                                Literal {
+                                    value: LiteralValue::Float(2.0),
+                                    span: 11..14,
                                 }
                                 .into(),
                             ),
+                            span: 5..14,
                         }
-                        .into(),
-                    ],
-                    ret_last: false,
-                }),
+                        .into()],
+                        ret_last: false,
+                        span: 4..16,
+                    },
+                    span: 0..16,
+                },
+            ),
+            (
+                "step { let two = 2; let three = 3e1; yield two / three; } ",
+                Step {
+                    block: Block {
+                        exprs: vec![
+                            Let {
+                                name: Ident::new("two", 11..14),
+                                value: Box::new(
+                                    Literal {
+                                        value: LiteralValue::Float(2.0),
+                                        span: 17..18,
+                                    }
+                                    .into(),
+                                ),
+                                span: 7..18,
+                            }
+                            .into(),
+                            Let {
+                                name: Ident::new("three", 24..29),
+                                value: Box::new(
+                                    Literal {
+                                        value: LiteralValue::Float(30.0),
+                                        span: 32..35,
+                                    }
+                                    .into(),
+                                ),
+                                span: 20..35,
+                            }
+                            .into(),
+                            Yield {
+                                value: Box::new(
+                                    Binop {
+                                        left: Box::new(Var::new(Ident::new("two", 43..46)).into()),
+                                        right: Box::new(
+                                            Var::new(Ident::new("three", 49..54)).into(),
+                                        ),
+                                        op: BinopKind::Div,
+                                        span: 43..54,
+                                    }
+                                    .into(),
+                                ),
+                                span: 37..54,
+                            }
+                            .into(),
+                        ],
+                        ret_last: false,
+                        span: 5..58,
+                    },
+                    span: 0..58,
+                },
             ),
         ];
 

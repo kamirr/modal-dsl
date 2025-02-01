@@ -5,7 +5,7 @@ use crate::parse::{
     block::Block,
     expr::Expr,
     let_::Let,
-    literal::Literal,
+    literal::{Literal, LiteralValue},
     yield_::Yield,
 };
 
@@ -35,14 +35,19 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
     pub fn recurse(&mut self, expr: &Expr) -> TypedValue {
         match expr {
-            Expr::Literal(Literal::Float(f)) => TypedValue::float(self.builder, *f),
-            Expr::Let(Let { name, value }) => {
+            Expr::Literal(Literal {
+                value: LiteralValue::Float(f),
+                ..
+            }) => TypedValue::float(self.builder, *f),
+            Expr::Let(Let { name, value, .. }) => {
                 let tv = self.recurse(value);
-                self.stack.set(name.0.to_string(), tv);
+                self.stack.set(name.name.to_string(), tv);
                 tv
             }
-            Expr::Var(var) => self.stack.get(&var.name.0).unwrap(),
-            Expr::Block(Block { exprs, ret_last }) => {
+            Expr::Var(var) => self.stack.get(&var.name.name).unwrap(),
+            Expr::Block(Block {
+                exprs, ret_last, ..
+            }) => {
                 self.stack.push();
                 let last = exprs
                     .iter()
@@ -57,7 +62,9 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     TypedValue::UNIT
                 }
             }
-            Expr::Binop(Binop { left, right, op }) => {
+            Expr::Binop(Binop {
+                left, right, op, ..
+            }) => {
                 use BinopKind::*;
 
                 let mut l = self.recurse(left);
@@ -82,7 +89,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 }
                 .unwrap()
             }
-            Expr::Yield(Yield { value }) => {
+            Expr::Yield(Yield { value, .. }) => {
                 let Some(retss) = self.retss else {
                     panic!("retss not provided")
                 };
@@ -92,7 +99,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     .stack_store(self.builder, retss)
                     .unwrap()
             }
-            _ => todo!(),
+            Expr::Call(_call) => todo!(),
         }
     }
 }

@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{error::Simple, text::TextParser, Parser};
 
 use super::{inputs::Inputs, state::State, step::Step};
@@ -17,25 +19,50 @@ impl Item {
             .or(Inputs::parser(sample_rate).padded().map(Item::Inputs))
             .or(Step::parser(sample_rate).padded().map(Item::Step))
     }
+
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            Item::State(state) => state.span.clone(),
+            Item::Inputs(inputs) => inputs.span.clone(),
+            Item::Step(step) => step.span.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::parse::block::Block;
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
     #[test]
     fn test_item() {
         let cases = [
-            ("state {}", Item::State(State(vec![]))),
-            ("inputs {}", Item::Inputs(Inputs(vec![]))),
+            (
+                "state {}",
+                Item::State(State {
+                    entries: vec![],
+                    span: 0..8,
+                }),
+            ),
+            (
+                "inputs {}",
+                Item::Inputs(Inputs {
+                    entries: vec![],
+                    span: 0..9,
+                }),
+            ),
             (
                 "step {}",
-                Item::Step(Step(Block {
-                    exprs: vec![],
-                    ret_last: false,
-                })),
+                Item::Step(Step {
+                    block: Block {
+                        exprs: vec![],
+                        ret_last: false,
+                        span: 5..7,
+                    },
+                    span: 0..7,
+                }),
             ),
         ];
 

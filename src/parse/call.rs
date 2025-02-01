@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{
     error::Simple,
     prelude::{just, Recursive},
@@ -11,6 +13,7 @@ use super::{expr::Expr, path::Path};
 pub struct Call {
     pub path: Path,
     pub args: Vec<Expr>,
+    pub span: Range<usize>,
 }
 
 impl Call {
@@ -35,7 +38,8 @@ impl Call {
             .then_ignore(just(",").or_not())
             .then_ignore(whitespace())
             .then_ignore(just(")"))
-            .map(|((path, mut args), last)| Call {
+            .map_with_span(|((path, args), last), span| (path, args, last, span))
+            .map(|(path, mut args, last, span)| Call {
                 path,
                 args: {
                     if let Some(last) = last {
@@ -43,13 +47,18 @@ impl Call {
                     }
                     args
                 },
+                span,
             })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::{literal::Literal, path::Ident};
+    use crate::parse::{
+        literal::{Literal, LiteralValue},
+        path::Ident,
+    };
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
@@ -57,37 +66,83 @@ mod tests {
     fn test_call() {
         let cases = [
             (
-                &["foo(0)", "foo ( 0 )"][..],
+                &["foo(0)"][..],
                 Call {
-                    path: Path(vec![Ident::new("foo")]),
-                    args: vec![Expr::Literal(Literal::Float(0.0))],
+                    path: Path(vec![Ident::new("foo", 0..3)]),
+                    args: vec![Expr::Literal(Literal {
+                        value: LiteralValue::Float(0.0),
+                        span: 4..5,
+                    })],
+                    span: 0..6,
                 },
             ),
             (
-                &["foo.bar.baz(21,33)", "foo.bar.baz ( 2.1e1, 33.0 ,)"],
+                &["foo ( 0 )"][..],
+                Call {
+                    path: Path(vec![Ident::new("foo", 0..3)]),
+                    args: vec![Expr::Literal(Literal {
+                        value: LiteralValue::Float(0.0),
+                        span: 6..7,
+                    })],
+                    span: 0..9,
+                },
+            ),
+            (
+                &["foo.bar.baz(21,33)"],
                 Call {
                     path: Path(vec![
-                        Ident::new("foo"),
-                        Ident::new("bar"),
-                        Ident::new("baz"),
+                        Ident::new("foo", 0..3),
+                        Ident::new("bar", 4..7),
+                        Ident::new("baz", 8..11),
                     ]),
                     args: vec![
-                        Expr::Literal(Literal::Float(21.0)),
-                        Expr::Literal(Literal::Float(33.0)),
+                        Expr::Literal(Literal {
+                            value: LiteralValue::Float(21.0),
+                            span: 12..14,
+                        }),
+                        Expr::Literal(Literal {
+                            value: LiteralValue::Float(33.0),
+                            span: 15..17,
+                        }),
                     ],
+                    span: 0..18,
+                },
+            ),
+            (
+                &["foo.bar.baz ( 2.1e1, 33.0 ,)"],
+                Call {
+                    path: Path(vec![
+                        Ident::new("foo", 0..3),
+                        Ident::new("bar", 4..7),
+                        Ident::new("baz", 8..11),
+                    ]),
+                    args: vec![
+                        Expr::Literal(Literal {
+                            value: LiteralValue::Float(21.0),
+                            span: 14..19,
+                        }),
+                        Expr::Literal(Literal {
+                            value: LiteralValue::Float(33.0),
+                            span: 21..25,
+                        }),
+                    ],
+                    span: 0..28,
                 },
             ),
             (
                 &["foo(bar(baz()))"],
                 Call {
-                    path: Path(vec![Ident::new("foo")]),
+                    path: Path(vec![Ident::new("foo", 0..3)]),
                     args: vec![Expr::Call(Call {
-                        path: Path(vec![Ident::new("bar")]),
+                        path: Path(vec![Ident::new("bar", 4..7)]),
                         args: vec![Expr::Call(Call {
-                            path: Path(vec![Ident::new("baz")]),
+                            path: Path(vec![Ident::new("baz", 8..11)]),
                             args: vec![],
+                            span: 8..13,
                         })],
+                        span: 4..14,
                     })],
+                    span: 0..15,
                 },
             ),
         ];

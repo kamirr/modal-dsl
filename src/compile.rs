@@ -18,7 +18,12 @@ use storage::{MappedStorage, StorageBuf};
 use typed::{TypedStackSlot, TypedValue};
 use varstack::VarStack;
 
-use crate::parse::{inputs::InputEntry, literal::Literal, state::StateEntry, Program};
+use crate::parse::{
+    inputs::InputEntry,
+    literal::{Literal, LiteralValue},
+    state::StateEntry,
+    Program,
+};
 
 pub struct CompiledProgram {
     #[allow(dead_code)]
@@ -112,19 +117,27 @@ impl Compiler {
         builder.switch_to_block(block);
 
         let mut state_tvs = Vec::<(String, TypedValue, StateKind)>::new();
-        for StateEntry { name, init } in &program.state().0 {
+        for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
             let init_v = recursor.recurse(init);
-            state_tvs.push((name.0.clone(), init_v, StateKind::InternalState));
+            state_tvs.push((name.name.clone(), init_v, StateKind::InternalState));
         }
-        for InputEntry { name, default, .. } in &program.inputs().0 {
+        for InputEntry { name, default, .. } in &program.inputs().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
-            let init_v = recursor.recurse(&default.unwrap_or(Literal::Float(0.0)).into());
-            state_tvs.push((name.0.clone(), init_v, StateKind::Input));
+            let init_v = recursor.recurse(
+                &default
+                    .clone()
+                    .unwrap_or(Literal {
+                        value: LiteralValue::Float(0.0),
+                        span: 0..0,
+                    })
+                    .into(),
+            );
+            state_tvs.push((name.name.clone(), init_v, StateKind::Input));
         }
         let mapped_storage = Self::build_state_storage(&state_tvs)?;
 
@@ -189,7 +202,7 @@ impl Compiler {
         let retss = TypedStackSlot::float()(&mut builder);
 
         let mut recursor = Recursor::new(&mut builder, &mut stack, Some(retss));
-        for expr in &program.step().0.exprs {
+        for expr in &program.step().block.exprs {
             recursor.recurse(expr);
         }
 

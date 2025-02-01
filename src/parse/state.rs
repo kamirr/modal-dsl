@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{
     error::Simple,
     prelude::just,
@@ -11,27 +13,28 @@ use super::{expr::Expr, path::Ident};
 pub struct StateEntry {
     pub name: Ident,
     pub init: Expr,
+    pub span: Range<usize>,
 }
 
 impl StateEntry {
     #[cfg(test)]
-    pub fn new(name: impl Into<String>, init: Expr) -> Self {
-        StateEntry {
-            name: Ident::new(name),
-            init,
-        }
+    pub fn new(name: Ident, init: Expr, span: Range<usize>) -> Self {
+        StateEntry { name, init, span }
     }
 
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
         Ident::parser()
             .then_ignore(just("=").padded())
             .then(Expr::parser(sample_rate))
-            .map(|(name, init)| StateEntry { name, init })
+            .map_with_span(|(name, init), span| StateEntry { name, init, span })
     }
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct State(pub Vec<StateEntry>);
+pub struct State {
+    pub entries: Vec<StateEntry>,
+    pub span: Range<usize>,
+}
 
 impl State {
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
@@ -50,36 +53,40 @@ impl State {
             )
             .map(|((), entries)| entries)
             .then(StateEntry::parser(sample_rate).or_not())
-            .map(|(mut entries, last_entry)| {
+            .then_ignore(whitespace())
+            .then_ignore(just("}"))
+            .map_with_span(|(mut entries, last_entry), span| {
                 if let Some(entry) = last_entry {
                     entries.push(entry);
                 }
 
-                State(entries)
+                State { entries, span }
             })
-            .then_ignore(whitespace())
-            .then_ignore(just("}"))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::parse::literal::Literal;
+    use crate::parse::literal::{Literal, LiteralValue};
+    use pretty_assertions::assert_eq;
 
     use super::*;
 
     #[test]
     fn test_state_entry() {
-        let zero = Expr::Literal(Literal::Float(0.0));
-        let cases = [("in=0.0", ("in", zero))];
+        let zero = Expr::Literal(Literal {
+            value: LiteralValue::Float(0.0),
+            span: 3..6,
+        });
+        let cases = [("in=0.0", ("in", 0..2, zero))];
 
-        for (text, (name, init)) in cases {
+        for (text, (name, span, init)) in cases {
             assert_eq!(
                 StateEntry::parser(44100.0).parse(text),
                 Ok(StateEntry {
-                    name: Ident::new(name),
-
-                    init
+                    name: Ident::new(name, span),
+                    init,
+                    span: 0..6
                 })
             );
         }
@@ -87,22 +94,62 @@ mod tests {
 
     #[test]
     fn test_state() {
-        let zero: Expr = Literal::Float(0.0).into();
         let cases = [
             (
                 "state{in=0.0}",
-                State(vec![StateEntry::new("in", zero.clone())]),
+                State {
+                    entries: vec![StateEntry::new(
+                        Ident::new("in", 6..8),
+                        Literal {
+                            value: LiteralValue::Float(0.0),
+                            span: 9..12,
+                        }
+                        .into(),
+                        6..12,
+                    )],
+                    span: 0..13,
+                },
             ),
             (
                 "state{in = 0.0,}",
-                State(vec![StateEntry::new("in", zero.clone())]),
+                State {
+                    entries: vec![StateEntry::new(
+                        Ident::new("in", 6..8),
+                        Literal {
+                            value: LiteralValue::Float(0.0),
+                            span: 11..14,
+                        }
+                        .into(),
+                        6..14,
+                    )],
+                    span: 0..16,
+                },
             ),
             (
                 "state{in = 0.0,in2=0.0}",
-                State(vec![
-                    StateEntry::new("in", zero.clone()),
-                    StateEntry::new("in2", zero.clone()),
-                ]),
+                State {
+                    entries: vec![
+                        StateEntry::new(
+                            Ident::new("in", 6..8),
+                            Literal {
+                                value: LiteralValue::Float(0.0),
+                                span: 11..14,
+                            }
+                            .into(),
+                            6..14,
+                        ),
+                        StateEntry::new(
+                            Ident::new("in2", 15..18),
+                            Literal {
+                                value: LiteralValue::Float(0.0),
+                                span: 19..22,
+                            }
+                            .into(),
+                            15..22,
+                        ),
+                    ],
+                    span: 0..23,
+                },
             ),
         ];
 

@@ -9,10 +9,8 @@ pub struct Var {
 
 impl Var {
     #[cfg(test)]
-    pub fn new(name: impl Into<String>) -> Self {
-        Var {
-            name: Ident(name.into()),
-        }
+    pub fn new(name: Ident) -> Self {
+        Var { name }
     }
 
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {

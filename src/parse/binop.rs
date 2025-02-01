@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{error::Simple, prelude::just, Parser};
 
 use super::expr::Expr;
@@ -27,10 +29,13 @@ impl BinopKind {
     }
 
     pub fn apply(self, lhs: Expr, rhs: Expr) -> Binop {
+        let lspan = lhs.span();
+        let rspan = rhs.span();
         Binop {
             left: Box::new(lhs),
             right: Box::new(rhs),
             op: self,
+            span: lspan.start.min(rspan.start)..lspan.end.max(rspan.end),
         }
     }
 }
@@ -40,4 +45,5 @@ pub struct Binop {
     pub left: Box<Expr>,
     pub right: Box<Expr>,
     pub op: BinopKind,
+    pub span: Range<usize>,
 }

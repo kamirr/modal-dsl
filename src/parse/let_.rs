@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{
     error::Simple,
     prelude::{just, Recursive},
@@ -11,6 +13,7 @@ use super::{expr::Expr, kwords::LET, path::Ident};
 pub struct Let {
     pub name: Ident,
     pub value: Box<Expr>,
+    pub span: Range<usize>,
 }
 
 impl Let {
@@ -23,9 +26,11 @@ impl Let {
             .then(Ident::parser())
             .then_ignore(just("=").padded())
             .then(expr)
-            .map(|(((), name), value)| Let {
+            .map_with_span(|(((), name), value), span| (name, value, span))
+            .map(|(name, value, span)| Let {
                 name,
                 value: Box::new(value),
+                span,
             })
     }
 }

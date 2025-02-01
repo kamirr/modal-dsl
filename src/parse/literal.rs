@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{
     error::Simple,
     prelude::{choice, just, one_of},
@@ -17,8 +19,14 @@ impl Unit {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Literal {
+pub enum LiteralValue {
     Float(f32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Literal {
+    pub value: LiteralValue,
+    pub span: Range<usize>,
 }
 
 impl Literal {
@@ -73,29 +81,36 @@ impl Literal {
     }
 
     pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
-        Self::float_parser(sample_rate).map(Literal::Float)
+        Self::float_parser(sample_rate).map_with_span(|float, span| Literal {
+            value: LiteralValue::Float(float),
+            span,
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_literal() {
         let cases = [
-            ("2", 2.0),
-            ("1e1", 10.0),
-            ("2.0", 2.0),
-            ("20e-1", 2.0),
-            ("200%", 2.0),
-            ("10ms", 441.0),
+            ("2", 2.0, 0..1),
+            ("1e1", 10.0, 0..3),
+            ("2.0", 2.0, 0..3),
+            ("20e-1", 2.0, 0..5),
+            ("200%", 2.0, 0..4),
+            ("10ms", 441.0, 0..4),
         ];
 
-        for (text, expected) in cases {
+        for (text, expected_v, expected_span) in cases {
             assert_eq!(
                 Literal::parser(44100.0).parse(text),
-                Ok(Literal::Float(expected))
+                Ok(Literal {
+                    value: LiteralValue::Float(expected_v),
+                    span: expected_span
+                })
             )
         }
     }

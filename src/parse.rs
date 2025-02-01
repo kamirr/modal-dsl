@@ -34,20 +34,46 @@ impl Program {
             .padded()
             .repeated()
             .at_least(3)
-            .validate(|items, span, emit| {
-                let states = items.iter().filter(|i| matches!(i, Item::State(_))).count();
-                let inputs = items.iter().filter(|i| matches!(i, Item::State(_))).count();
-                let steps = items.iter().filter(|i| matches!(i, Item::Step(_))).count();
-                for (var, name) in [(states, "state"), (inputs, "inputs"), (steps, "step")] {
-                    if var == 0 {
-                        emit(Simple::custom(span.clone(), format!("{name} not defined")));
-                    } else if states > 1 {
-                        emit(Simple::custom(
-                            span.clone(),
-                            format!("multiple {name} definitions"),
-                        ));
+            .validate(|items, _span, emit| {
+                let mut one_state = false;
+                let mut one_inputs = false;
+                let mut one_step = false;
+
+                for item in items.iter() {
+                    match item {
+                        Item::State(state) => {
+                            if !one_state {
+                                one_state = true;
+                            } else {
+                                emit(Simple::custom(
+                                    state.span.clone(),
+                                    "Duplicate state definition",
+                                ));
+                            }
+                        }
+                        Item::Inputs(inputs) => {
+                            if !one_inputs {
+                                one_inputs = true;
+                            } else {
+                                emit(Simple::custom(
+                                    inputs.span.clone(),
+                                    "Duplicate inputs definition",
+                                ));
+                            }
+                        }
+                        Item::Step(step) => {
+                            if !one_step {
+                                one_step = true;
+                            } else {
+                                emit(Simple::custom(
+                                    step.span.clone(),
+                                    "Duplicate step definition",
+                                ));
+                            }
+                        }
                     }
                 }
+
                 items
             })
             .map(Program)

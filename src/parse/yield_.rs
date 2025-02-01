@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use chumsky::{
     error::Simple,
     prelude::{just, Recursive},
@@ -10,6 +12,7 @@ use super::{expr::Expr, kwords::YIELD};
 #[derive(Clone, Debug, PartialEq)]
 pub struct Yield {
     pub value: Box<Expr>,
+    pub span: Range<usize>,
 }
 
 impl Yield {
@@ -20,8 +23,10 @@ impl Yield {
             .padded()
             .ignored()
             .then(expr)
-            .map(|((), value)| Yield {
+            .map_with_span(|((), value), span| (value, span))
+            .map(|(value, span)| Yield {
                 value: Box::new(value),
+                span,
             })
     }
 }
