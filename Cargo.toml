@@ -13,5 +13,8 @@ cranelift-codegen = "0.116.1"
 cranelift-native = "0.116.1"
 derive_more = { version = "1.0.0", features = ["from"] }
 
+[dev-dependencies]
+ariadne = "0.5.0"
+
 [profile.release]
 debug = true

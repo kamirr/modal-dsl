@@ -7,7 +7,7 @@ inputs { }
 
 step {
     yield a;
-
+    
     let c = a + b;
     a = b;
     b = c;

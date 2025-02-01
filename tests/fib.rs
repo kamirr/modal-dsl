@@ -3,7 +3,7 @@ use modal_dsl::{compile::Compiler, parse::Program};
 
 #[test]
 fn test_fib() {
-    let text = std::fs::read("examples/fib.modal").unwrap();
+    let text = std::fs::read("examples/samples/fib.modal").unwrap();
     let text = String::from_utf8(text).unwrap();
 
     let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();

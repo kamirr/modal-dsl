@@ -33,11 +33,11 @@ impl Program {
         Item::parser(sample_rate)
             .padded()
             .repeated()
+            .at_least(3)
             .validate(|items, span, emit| {
                 let states = items.iter().filter(|i| matches!(i, Item::State(_))).count();
                 let inputs = items.iter().filter(|i| matches!(i, Item::State(_))).count();
                 let steps = items.iter().filter(|i| matches!(i, Item::Step(_))).count();
-
                 for (var, name) in [(states, "state"), (inputs, "inputs"), (steps, "step")] {
                     if var == 0 {
                         emit(Simple::custom(span.clone(), format!("{name} not defined")));

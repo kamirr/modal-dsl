@@ -3,7 +3,7 @@ use modal_dsl::{compile::Compiler, parse::Program};
 
 #[test]
 fn test_delay3() {
-    let text = std::fs::read("examples/delay3.modal").unwrap();
+    let text = std::fs::read("examples/samples/delay3.modal").unwrap();
     let text = String::from_utf8(text).unwrap();
 
     let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
