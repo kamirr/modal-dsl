@@ -9,12 +9,13 @@ use cranelift::{
     jit::{JITBuilder, JITModule},
     module::{default_libcall_names, Linkage, Module},
     prelude::{
-        types::F32, AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
+        types::{self, F32},
+        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
     },
 };
 use cranelift_codegen::{settings, Context};
 use recursor::Recursor;
-use storage::{MappedStorage, StorageBuf};
+use storage::{MappedStorage, StorageBuf, StorageEntry, StorageEntryKind};
 use typed::{TypedStackSlot, TypedValue};
 use varstack::VarStack;
 
@@ -25,27 +26,33 @@ use crate::parse::{
     Program,
 };
 
+struct InitBuild {
+    init: fn(),
+    storage: MappedStorage,
+}
+
+#[derive(Debug)]
 pub struct CompiledProgram {
-    #[allow(dead_code)]
-    pub state: Arc<MappedStorage>,
-    pub inputs: HashMap<String, *mut f32>,
+    pub storage: Arc<MappedStorage>,
     init: fn(),
     step: fn() -> f32,
 }
 
 impl CompiledProgram {
-    pub fn init(&self) {
+    pub fn init(&mut self) {
         (self.init)()
     }
 
-    pub fn step(&self) -> f32 {
+    pub fn step(&mut self) -> f32 {
         (self.step)()
     }
 
-    pub fn set_input(&self, name: &str, value: f32) {
-        let ptr = self.inputs[name];
+    pub fn set_f32(&mut self, name: &str, value: f32) {
+        let entry = self.storage.get(name).unwrap();
+        assert_eq!(entry.ty, types::F32);
+        assert_eq!(entry.kind, StorageEntryKind::External);
         unsafe {
-            ptr.write(value);
+            (entry.ptr as *mut f32).write(value);
         }
     }
 }
@@ -81,23 +88,19 @@ impl Compiler {
     }
 
     pub fn compile(&mut self, program: &Program) -> anyhow::Result<CompiledProgram> {
-        let (init, state_storage, inputs) = self.build_init(program)?;
+        let InitBuild { init, storage } = self.build_init(program)?;
 
-        let state_storage = Arc::new(state_storage);
-        let step = self.build_step(program, Arc::clone(&state_storage))?;
+        let storage = Arc::new(storage);
+        let step = self.build_step(program, Arc::clone(&storage))?;
 
         Ok(CompiledProgram {
-            state: state_storage,
-            inputs,
+            storage,
             init,
             step,
         })
     }
 
-    fn build_init(
-        &mut self,
-        program: &Program,
-    ) -> anyhow::Result<(fn(), MappedStorage, HashMap<String, *mut f32>)> {
+    fn build_init(&mut self, program: &Program) -> anyhow::Result<InitBuild> {
         self.module_ctx.func.signature.params = vec![];
         self.module_ctx.func.signature.returns = vec![];
 
@@ -116,13 +119,13 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        let mut state_tvs = Vec::<(String, TypedValue, StateKind)>::new();
+        let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind)>::new();
         for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
             let init_v = recursor.recurse(init);
-            state_tvs.push((name.name.clone(), init_v, StateKind::InternalState));
+            storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::Internal));
         }
         for InputEntry { name, default, .. } in &program.inputs().entries {
             let mut stack = VarStack::new();
@@ -137,20 +140,16 @@ impl Compiler {
                     })
                     .into(),
             );
-            state_tvs.push((name.name.clone(), init_v, StateKind::Input));
+            storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::External));
         }
-        let mapped_storage = Self::build_state_storage(&state_tvs)?;
+        let mapped_storage = Self::build_state_storage(&storage_tvs)?;
 
-        let mut inputs = HashMap::new();
-        for (name, ptr_v) in mapped_storage.iter() {
-            let (init_v, kind) = state_tvs
+        for (name, ptr_v) in mapped_storage.typed_values() {
+            let init_v = storage_tvs
                 .iter()
-                .find_map(|(id, init_v, kind)| (id == name).then_some((*init_v, *kind)))
+                .find_map(|(id, init_v, _kind)| (id == name).then_some(*init_v))
                 .unwrap();
 
-            if kind == StateKind::Input {
-                inputs.insert(name.to_string(), ptr_v.as_ptr() as *mut f32);
-            }
             ptr_v.assign(&mut builder, init_v).unwrap();
         }
 
@@ -168,7 +167,10 @@ impl Compiler {
 
         let func = unsafe { std::mem::transmute::<*const u8, fn()>(code) };
 
-        Ok((func, mapped_storage, inputs))
+        Ok(InitBuild {
+            init: func,
+            storage: mapped_storage,
+        })
     }
 
     fn build_step(
@@ -195,7 +197,7 @@ impl Compiler {
         builder.switch_to_block(block);
 
         let mut stack = VarStack::new();
-        for (name, ref_tv) in mapped_storage.iter() {
+        for (name, ref_tv) in mapped_storage.typed_values() {
             stack.set(name.to_string(), ref_tv);
         }
 
@@ -206,7 +208,7 @@ impl Compiler {
             recursor.recurse(expr);
         }
 
-        let read_ret = TypedValue::stack_load(&mut builder, retss).inner().unwrap();
+        let read_ret = TypedValue::stack_load(&mut builder, retss).value().unwrap();
         builder.ins().return_(&[read_ret]);
 
         println!("step:\n{}", builder.func.display());
@@ -225,7 +227,7 @@ impl Compiler {
     }
 
     fn build_state_storage(
-        entries: &[(String, TypedValue, StateKind)],
+        entries: &[(String, TypedValue, StorageEntryKind)],
     ) -> anyhow::Result<MappedStorage> {
         let mut offset = 0usize;
         let mut state_mapping = HashMap::new();
@@ -249,20 +251,18 @@ impl Compiler {
         let storage_len = offset;
         let storage = StorageBuf::new(storage_len);
 
-        for (name, tv, _kind) in entries {
+        for (name, tv, kind) in entries {
             let offset = offsets.get(name).unwrap();
             state_mapping.insert(name.clone(), unsafe {
-                tv.ref_this(storage.get(*offset).as_ptr())
+                StorageEntry {
+                    ty: tv.cl_type()?,
+                    kind: *kind,
+                    ptr: storage.get(*offset).as_ptr() as *mut u8,
+                }
             });
         }
 
         // See MappedStorage::new invariants
         Ok(unsafe { MappedStorage::new(state_mapping, storage) })
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum StateKind {
-    InternalState,
-    Input,
 }

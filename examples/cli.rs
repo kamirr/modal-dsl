@@ -24,13 +24,13 @@ fn main() {
 
     let now = Instant::now();
     let mut compiler = Compiler::new().unwrap();
-    let compiled = compiler.compile(&program.unwrap()).unwrap();
+    let mut compiled = compiler.compile(&program.unwrap()).unwrap();
     println!(
         "compilation took {:.2}ms",
         now.elapsed().as_secs_f32() * 1000.0
     );
 
-    println!("State mapping: {:#?}", compiled.state);
+    println!("State mapping: {:#?}", compiled);
 
     compiled.init();
     for k in 0..12 {

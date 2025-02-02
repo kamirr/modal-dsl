@@ -8,15 +8,15 @@ fn test_delay3() {
 
     let prog = Program::parser(44100.0).parse(text.as_str()).unwrap();
     let mut compiler = Compiler::new().unwrap();
-    let compiled = compiler.compile(&prog).unwrap();
+    let mut compiled = compiler.compile(&prog).unwrap();
 
     compiled.init();
 
-    compiled.set_input("in", 1.0);
+    compiled.set_f32("in", 1.0);
     assert_eq!(compiled.step(), 0.0);
-    compiled.set_input("in", 2.0);
+    compiled.set_f32("in", 2.0);
     assert_eq!(compiled.step(), 0.0);
-    compiled.set_input("in", 3.0);
+    compiled.set_f32("in", 3.0);
     assert_eq!(compiled.step(), 0.0);
     assert_eq!(compiled.step(), 1.0);
     assert_eq!(compiled.step(), 2.0);

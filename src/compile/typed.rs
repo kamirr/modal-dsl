@@ -27,10 +27,10 @@ impl TypedStackSlot {
 }
 
 #[derive(Clone, Copy, Debug)]
-enum TypedValueImpl {
+pub(crate) enum TypedValueImpl {
     Unit,
     Float(Value),
-    FloatRef(*mut u8),
+    FloatRef(*mut f32),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,14 +39,18 @@ pub struct TypedValue(TypedValueImpl);
 impl TypedValue {
     pub const UNIT: Self = TypedValue(TypedValueImpl::Unit);
 
-    pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> TypedValue {
+    pub(crate) unsafe fn from_inner(inner: TypedValueImpl) -> Self {
+        TypedValue(inner)
+    }
+
+    pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
         TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
     }
 
-    pub unsafe fn ref_this(self, ptr: *mut u8) -> TypedValue {
+    pub unsafe fn ref_this(self, ptr: *mut u8) -> Self {
         let TypedValue(tvi) = self;
         TypedValue(match tvi {
-            TypedValueImpl::Float(_) => TypedValueImpl::FloatRef(ptr),
+            TypedValueImpl::Float(_) => TypedValueImpl::FloatRef(ptr as *mut f32),
             TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => panic!(),
         })
     }
@@ -54,12 +58,12 @@ impl TypedValue {
     pub fn as_ptr(self) -> *mut u8 {
         let TypedValue(tvi) = self;
         match tvi {
-            TypedValueImpl::FloatRef(ptr) => ptr,
+            TypedValueImpl::FloatRef(ptr) => ptr as *mut u8,
             TypedValueImpl::Float(_) | TypedValueImpl::Unit => panic!(),
         }
     }
 
-    pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> TypedValue {
+    pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> Self {
         let TypedStackSlot(tssi) = tss;
         match tssi {
             TypedStackSlotImpl::Float(ss) => {
@@ -72,7 +76,7 @@ impl TypedValue {
         self,
         builder: &mut FunctionBuilder<'_>,
         tss: TypedStackSlot,
-    ) -> anyhow::Result<TypedValue> {
+    ) -> anyhow::Result<Self> {
         let TypedValue(tvi) = self;
         let TypedStackSlot(tssi) = tss;
         match (tvi, tssi) {
@@ -100,7 +104,7 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn sub(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<TypedValue> {
+    pub fn sub(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
@@ -114,7 +118,7 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn mul(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<TypedValue> {
+    pub fn mul(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
@@ -128,7 +132,7 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn div(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<TypedValue> {
+    pub fn div(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
@@ -142,11 +146,7 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn assign(
-        self,
-        builder: &mut FunctionBuilder<'_>,
-        other: Self,
-    ) -> anyhow::Result<TypedValue> {
+    pub fn assign(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
@@ -162,7 +162,7 @@ impl TypedValue {
         Ok(other)
     }
 
-    pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> TypedValue {
+    pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> Self {
         let TypedValue(tvi) = self;
         TypedValue(match tvi {
             TypedValueImpl::Float(v) => TypedValueImpl::Float(v),
@@ -174,7 +174,7 @@ impl TypedValue {
         })
     }
 
-    pub fn inner(self) -> anyhow::Result<Value> {
+    pub fn value(self) -> anyhow::Result<Value> {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Float(v) => Ok(v),

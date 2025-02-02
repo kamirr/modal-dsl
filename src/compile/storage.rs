@@ -4,7 +4,9 @@ use std::{
     ptr::NonNull,
 };
 
-use super::typed::TypedValue;
+use cranelift::prelude::{types, Type};
+
+use super::typed::{TypedValue, TypedValueImpl};
 
 #[derive(Debug)]
 pub struct StorageBuf {
@@ -56,9 +58,22 @@ impl Drop for StorageBuf {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StorageEntryKind {
+    Internal,
+    External,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct StorageEntry {
+    pub ty: Type,
+    pub kind: StorageEntryKind,
+    pub ptr: *mut u8,
+}
+
 #[derive(Debug)]
 pub struct MappedStorage {
-    mapping: HashMap<String, TypedValue>,
+    mapping: HashMap<String, StorageEntry>,
     // storage is here to keep it alive
     #[allow(dead_code)]
     storage: StorageBuf,
@@ -70,11 +85,20 @@ impl MappedStorage {
     /// SAFETY:
     /// Mapping must correctly describe pointers of state variables pointing to
     /// within the storage. [`StateStorage`] must have the correct size.
-    pub unsafe fn new(mapping: HashMap<String, TypedValue>, storage: StorageBuf) -> Self {
+    pub unsafe fn new(mapping: HashMap<String, StorageEntry>, storage: StorageBuf) -> Self {
         MappedStorage { mapping, storage }
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&str, TypedValue)> {
-        self.mapping.iter().map(|(s, tv)| (s.as_str(), *tv))
+    pub fn get(&self, name: &str) -> Option<StorageEntry> {
+        self.mapping.get(name).copied()
+    }
+
+    pub fn typed_values(&self) -> impl Iterator<Item = (&str, TypedValue)> {
+        self.mapping.iter().map(|(s, entry)| {
+            (s.as_str(), unsafe {
+                assert_eq!(entry.ty, types::F32);
+                TypedValue::from_inner(TypedValueImpl::FloatRef(entry.ptr as *mut f32))
+            })
+        })
     }
 }
