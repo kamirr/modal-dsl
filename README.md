@@ -7,6 +7,5 @@ JIT-compiled language for writing modules in the software synthesiser
 Very much work in progress.
 - Barely has any features.
 - No optimizations beyond what cranelift does.
-- Will panic if you look at it wrong.
-- It's likely to have safety bugs.
-- Error reporting is non-existent.
+- A few functions will panic on bad inputs.
+- Terrible, but somewhat informative error reporting.
