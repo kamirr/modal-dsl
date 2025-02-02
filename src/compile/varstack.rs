@@ -21,14 +21,14 @@ impl VarStack {
         self.inner.pop().unwrap();
     }
 
-    pub fn get(&self, name: &str) -> anyhow::Result<TypedValue> {
+    pub fn get(&self, name: &str) -> Option<TypedValue> {
         for layer in self.inner.iter().rev() {
             if let Some(entry) = layer.get(name) {
-                return Ok(*entry);
+                return Some(*entry);
             }
         }
 
-        Err(anyhow::Error::msg(format!("Variable {name} undefined")))
+        None
     }
 
     pub fn set(&mut self, name: String, tv: TypedValue) {

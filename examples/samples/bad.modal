@@ -1,14 +1,7 @@
-state {
-    a = 1,
-    b = 1
-}
-
+state { }
 inputs { }
 
 step {
-    yield a;
-    
-    let c = a + b;
-    a = b;
-    b = c;
+    let a = 2;
+    a = 3;
 }

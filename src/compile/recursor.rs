@@ -6,12 +6,15 @@ use crate::parse::{
     expr::Expr,
     let_::Let,
     literal::{Literal, LiteralValue},
+    path::Ident,
+    var::Var,
     yield_::Yield,
 };
 
 use super::{
     typed::{TypedStackSlot, TypedValue},
     varstack::VarStack,
+    CompileError,
 };
 
 pub struct Recursor<'fb, 'b, 'vs> {
@@ -33,42 +36,44 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }
     }
 
-    pub fn recurse(&mut self, expr: &Expr) -> TypedValue {
+    pub fn recurse(&mut self, expr: &Expr) -> Result<TypedValue, CompileError> {
         match expr {
             Expr::Literal(Literal {
                 value: LiteralValue::Float(f),
                 ..
-            }) => TypedValue::float(self.builder, *f),
+            }) => Ok(TypedValue::float(self.builder, *f)),
             Expr::Let(Let { name, value, .. }) => {
-                let tv = self.recurse(value);
+                let tv = self.recurse(value)?;
                 self.stack.set(name.name.to_string(), tv);
-                tv
+                Ok(tv)
             }
-            Expr::Var(var) => self.stack.get(&var.name.name).unwrap(),
+            Expr::Var(Var {
+                name: Ident { name, span },
+            }) => self.stack.get(&name).ok_or_else(|| {
+                CompileError::new(format!("Variable {} not in scope", name), span.clone())
+            }),
             Expr::Block(Block {
                 exprs, ret_last, ..
             }) => {
                 self.stack.push();
-                let last = exprs
-                    .iter()
-                    .map(|expr| self.recurse(expr))
-                    .last()
-                    .unwrap_or(TypedValue::UNIT);
+                let mut last = TypedValue::UNIT;
+                for expr in exprs {
+                    last = self.recurse(expr)?;
+                }
                 self.stack.pop();
 
-                if *ret_last {
-                    last
-                } else {
-                    TypedValue::UNIT
-                }
+                Ok(if *ret_last { last } else { TypedValue::UNIT })
             }
             Expr::Binop(Binop {
-                left, right, op, ..
+                left,
+                right,
+                op,
+                span,
             }) => {
                 use BinopKind::*;
 
-                let mut l = self.recurse(left);
-                let mut r = self.recurse(right);
+                let mut l = self.recurse(left)?;
+                let mut r = self.recurse(right)?;
 
                 match op {
                     Add | Sub | Mul | Div => {
@@ -87,17 +92,17 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     Div => l.div(self.builder, r),
                     Assign => l.assign(self.builder, r),
                 }
-                .unwrap()
+                .map_err(|e| CompileError::new(e.msg(), span.clone()))
             }
-            Expr::Yield(Yield { value, .. }) => {
+            Expr::Yield(Yield { value, span }) => {
                 let Some(retss) = self.retss else {
                     panic!("retss not provided")
                 };
 
-                let tv = self.recurse(value);
+                let tv = self.recurse(value)?;
                 tv.autoderef(self.builder)
                     .stack_store(self.builder, retss)
-                    .unwrap()
+                    .map_err(|e| CompileError::new(e.msg(), span.clone()))
             }
             Expr::Call(_call) => todo!(),
         }

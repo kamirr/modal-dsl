@@ -26,6 +26,42 @@ impl TypedStackSlot {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum TypedOpError {
+    InvalidStore {
+        slot: TypedStackSlot,
+        value: TypedValue,
+    },
+    InvalidOp {
+        lhs: TypedValue,
+        rhs: TypedValue,
+        op: &'static str,
+    },
+    ClValue {
+        this: TypedValue,
+    },
+    ClType {
+        this: TypedValue,
+    },
+}
+
+impl TypedOpError {
+    pub fn msg(&self) -> String {
+        match self {
+            TypedOpError::InvalidStore { slot, value } => {
+                format!("Can't store {value:?} in {slot:?}")
+            }
+            TypedOpError::InvalidOp { lhs, rhs, op } => {
+                format!("Operation {lhs:?} {op} {rhs:?} undefined")
+            }
+            TypedOpError::ClValue { this } => {
+                format!("{this:?} does not have a cranelift value")
+            }
+            TypedOpError::ClType { this } => format!("{this:?} does not have a cranelift type"),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TypedValueImpl {
     Unit,
@@ -72,7 +108,7 @@ impl TypedValue {
         self,
         builder: &mut FunctionBuilder<'_>,
         tss: TypedStackSlot,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, TypedOpError> {
         let TypedValue(tvi) = self;
         let TypedStackSlot(tssi) = tss;
         match (tvi, tssi) {
@@ -80,76 +116,107 @@ impl TypedValue {
                 builder.ins().stack_store(value, ss, 0);
                 TypedValue::UNIT
             }),
-            _ => Err(anyhow::Error::msg(format!(
-                "Can't store {self:?} in {tss:?}"
-            ))),
+            _ => Err(TypedOpError::InvalidStore {
+                slot: tss,
+                value: self,
+            }),
         }
     }
 
-    pub fn add(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<TypedValue> {
+    pub fn add(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(anyhow::Error::msg(format!(
-                "Addition not defined for {self:?} {other:?}"
-            )));
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "+",
+            });
         };
 
         let v = builder.ins().fadd(l, r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn sub(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
+    pub fn sub(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(anyhow::Error::msg(format!(
-                "Subtraction not defined for {self:?} {other:?}"
-            )));
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "-",
+            });
         };
 
         let v = builder.ins().fsub(l, r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn mul(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
+    pub fn mul(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(anyhow::Error::msg(format!(
-                "Multiplication not defined for {self:?} {other:?}"
-            )));
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "*",
+            });
         };
 
         let v = builder.ins().fmul(l, r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn div(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
+    pub fn div(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(anyhow::Error::msg(format!(
-                "Division not defined for {self:?} {other:?}"
-            )));
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "/",
+            });
         };
 
         let v = builder.ins().fdiv(l, r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn assign(self, builder: &mut FunctionBuilder<'_>, other: Self) -> anyhow::Result<Self> {
+    pub fn assign(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::FloatRef(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(anyhow::Error::msg(format!(
-                "Assignement not defined for {self:?} {other:?}"
-            )));
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "=",
+            });
         };
 
         let ptr = builder.ins().iconst(I64, l as i64);
@@ -170,29 +237,23 @@ impl TypedValue {
         })
     }
 
-    pub fn value(self) -> anyhow::Result<Value> {
+    pub fn value(self) -> Result<Value, TypedOpError> {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Float(v) => Ok(v),
-            TypedValueImpl::FloatRef(_) => Err(anyhow::Error::msg(format!(
-                "{self:?} doesn't have a corresponding cranelift value"
-            ))),
-            TypedValueImpl::Unit => Err(anyhow::Error::msg(format!(
-                "{self:?} doesn't have a corresponding cranelift value"
-            ))),
+            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => {
+                Err(TypedOpError::ClValue { this: self })
+            }
         }
     }
 
-    pub fn cl_type(self) -> anyhow::Result<Type> {
+    pub fn cl_type(self) -> Result<Type, TypedOpError> {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Float(_) => Ok(F32),
-            TypedValueImpl::FloatRef(_) => Err(anyhow::Error::msg(format!(
-                "{self:?} doesn't have a corresponding cranelift type"
-            ))),
-            TypedValueImpl::Unit => Err(anyhow::Error::msg(format!(
-                "{self:?} doesn't have a corresponding cranelift type"
-            ))),
+            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => {
+                Err(TypedOpError::ClType { this: self })
+            }
         }
     }
 }

@@ -3,7 +3,7 @@ mod storage;
 mod typed;
 mod varstack;
 
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, error::Error, ops::Range, sync::Arc};
 
 use cranelift::{
     jit::{JITBuilder, JITModule},
@@ -29,6 +29,30 @@ use crate::parse::{
 struct InitBuild {
     init: fn(),
     storage: MappedStorage,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompileError {
+    pub span: Range<usize>,
+    pub msg: String,
+}
+
+impl CompileError {
+    pub fn new(msg: impl Into<String>, span: Range<usize>) -> Self {
+        CompileError {
+            span,
+            msg: msg.into(),
+        }
+    }
+}
+
+impl<E: Error> From<E> for CompileError {
+    fn from(error: E) -> Self {
+        CompileError {
+            span: 0..0,
+            msg: error.to_string(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -93,7 +117,7 @@ impl Compiler {
         Ok(Compiler { module, module_ctx })
     }
 
-    pub fn compile(&mut self, program: &Program) -> anyhow::Result<CompiledProgram> {
+    pub fn compile(&mut self, program: &Program) -> Result<CompiledProgram, CompileError> {
         let InitBuild { init, storage } = self.build_init(program)?;
 
         let storage = Arc::new(storage);
@@ -106,7 +130,7 @@ impl Compiler {
         })
     }
 
-    fn build_init(&mut self, program: &Program) -> anyhow::Result<InitBuild> {
+    fn build_init(&mut self, program: &Program) -> Result<InitBuild, CompileError> {
         self.module_ctx.func.signature.params = vec![];
         self.module_ctx.func.signature.returns = vec![];
 
@@ -125,35 +149,45 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind)>::new();
+        let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind, Range<usize>)>::new();
         for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
-            let init_v = recursor.recurse(init);
-            storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::Internal));
+            let init_v = recursor.recurse(init)?;
+            storage_tvs.push((
+                name.name.clone(),
+                init_v,
+                StorageEntryKind::Internal,
+                init.span(),
+            ));
         }
         for InputEntry { name, default, .. } in &program.inputs().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None);
 
-            let init_v = recursor.recurse(
-                &default
-                    .clone()
-                    .unwrap_or(Literal {
-                        value: LiteralValue::Float(0.0),
-                        span: 0..0,
-                    })
-                    .into(),
-            );
-            storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::External));
+            let default = default
+                .clone()
+                .unwrap_or(Literal {
+                    value: LiteralValue::Float(0.0),
+                    span: 0..0,
+                })
+                .into();
+
+            let init_v = recursor.recurse(&default)?;
+            storage_tvs.push((
+                name.name.clone(),
+                init_v,
+                StorageEntryKind::External,
+                default.span(),
+            ));
         }
         let mapped_storage = Self::build_state_storage(&storage_tvs)?;
 
         for (name, ptr_v) in mapped_storage.typed_values() {
             let init_v = storage_tvs
                 .iter()
-                .find_map(|(id, init_v, _kind)| (id == name).then_some(*init_v))
+                .find_map(|(id, init_v, _kind, _span)| (id == name).then_some(*init_v))
                 .unwrap();
 
             ptr_v.assign(&mut builder, init_v).unwrap();
@@ -187,7 +221,7 @@ impl Compiler {
         &mut self,
         program: &Program,
         mapped_storage: Arc<MappedStorage>,
-    ) -> anyhow::Result<fn() -> f32> {
+    ) -> Result<fn() -> f32, CompileError> {
         self.module_ctx.func.signature.params = vec![];
         self.module_ctx.func.signature.returns = vec![AbiParam::new(F32)];
 
@@ -215,7 +249,7 @@ impl Compiler {
 
         let mut recursor = Recursor::new(&mut builder, &mut stack, Some(retss));
         for expr in &program.step().block.exprs {
-            recursor.recurse(expr);
+            recursor.recurse(expr)?;
         }
 
         let read_ret = TypedValue::stack_load(&mut builder, retss).value().unwrap();
@@ -241,14 +275,16 @@ impl Compiler {
     }
 
     fn build_state_storage(
-        entries: &[(String, TypedValue, StorageEntryKind)],
-    ) -> anyhow::Result<MappedStorage> {
+        entries: &[(String, TypedValue, StorageEntryKind, Range<usize>)],
+    ) -> Result<MappedStorage, CompileError> {
         let mut offset = 0usize;
         let mut state_mapping = HashMap::new();
         let mut offsets = HashMap::new();
 
-        for (name, tv, _kind) in entries {
-            let abi_type = tv.cl_type()?;
+        for (name, tv, _kind, span) in entries {
+            let abi_type = tv
+                .cl_type()
+                .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
 
             // Assumption that align is the same as size is overly restrictive
             let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
@@ -265,11 +301,13 @@ impl Compiler {
         let storage_len = offset;
         let storage = StorageBuf::new(storage_len);
 
-        for (name, tv, kind) in entries {
+        for (name, tv, kind, span) in entries {
             let offset = offsets.get(name).unwrap();
             state_mapping.insert(name.clone(), unsafe {
                 StorageEntry {
-                    ty: tv.cl_type()?,
+                    ty: tv
+                        .cl_type()
+                        .map_err(|e| CompileError::new(e.msg(), span.clone()))?,
                     kind: *kind,
                     ptr: storage.get(*offset).as_ptr() as *mut u8,
                 }

@@ -3,7 +3,7 @@ use std::time::Instant;
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::error::Simple;
 use chumsky::Parser;
-use modal_dsl::compile::Compiler;
+use modal_dsl::compile::{CompileError, Compiler};
 use modal_dsl::parse::Program;
 
 fn main() {
@@ -15,7 +15,7 @@ fn main() {
 
     let now = Instant::now();
     let (program, errs) = Program::parser(44100.0).parse_recovery(src.clone());
-    report_errors(&errs, &src);
+    report_parse_errors(&errs, &src);
     if errs.len() > 0 {
         return;
     }
@@ -24,7 +24,13 @@ fn main() {
 
     let now = Instant::now();
     let mut compiler = Compiler::new().unwrap();
-    let mut compiled = compiler.compile(&program.unwrap()).unwrap();
+    let mut compiled = match compiler.compile(&program.unwrap()) {
+        Ok(prog) => prog,
+        Err(error) => {
+            report_compile_error(error, &src);
+            return;
+        }
+    };
     println!(
         "compilation took {:.2}ms",
         now.elapsed().as_secs_f32() * 1000.0
@@ -38,7 +44,7 @@ fn main() {
     }
 }
 
-fn report_errors(errs: &[Simple<char>], src: &str) {
+fn report_parse_errors(errs: &[Simple<char>], src: &str) {
     errs.into_iter().for_each(|e| {
         let msg = if let chumsky::error::SimpleReason::Custom(msg) = e.reason() {
             msg.clone()
@@ -101,4 +107,16 @@ fn report_errors(errs: &[Simple<char>], src: &str) {
 
         report.finish().print(Source::from(&src)).unwrap();
     });
+}
+
+fn report_compile_error(error: CompileError, src: &str) {
+    let report = Report::build(ReportKind::Error, error.span.clone())
+        .with_code(3)
+        .with_message("Compilation error")
+        .with_label(
+            Label::new(error.span)
+                .with_message(error.msg)
+                .with_color(Color::Red),
+        );
+    report.finish().print(Source::from(&src)).unwrap();
 }
