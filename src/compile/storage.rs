@@ -22,8 +22,15 @@ impl StorageBuf {
                 len: 0,
             }
         } else {
+            let layout = Layout::from_size_align(len, 8).unwrap();
+            // SAFETY:
+            // - layout has non-zero size.
+            // - returned ptr is asserted to be non-zero.
+            //
+            // Both are guaranteed within this function.
             let ptr = unsafe {
-                let ptr = alloc(Layout::from_size_align(len, 8).unwrap());
+                let ptr = alloc(layout);
+                assert!(!ptr.is_null());
                 ptr.write_bytes(0, len);
 
                 ptr
@@ -48,6 +55,12 @@ impl StorageBuf {
 impl Drop for StorageBuf {
     fn drop(&mut self) {
         if self.ptr != NonNull::dangling() {
+            // SAFETY:
+            // - layout is the same as during allocation
+            // - pointer is allocated by the global allocator
+            //
+            // Layout is copy-paste from StorageBuf::new and the pointer comes
+            // directly from alloc call in the constructor.
             unsafe {
                 dealloc(
                     self.ptr.as_ptr(),
@@ -84,7 +97,10 @@ impl MappedStorage {
     ///
     /// SAFETY:
     /// Mapping must correctly describe pointers of state variables pointing to
-    /// within the storage. [`StateStorage`] must have the correct size.
+    /// within the storage and their types. [`StateStorage`] must have the correct
+    /// size.
+    ///
+    /// Mismatched [`StorageEntryKind`] does not result in UB.
     pub unsafe fn new(mapping: HashMap<String, StorageEntry>, storage: StorageBuf) -> Self {
         MappedStorage { mapping, storage }
     }
@@ -95,9 +111,14 @@ impl MappedStorage {
 
     pub fn typed_values(&self) -> impl Iterator<Item = (&str, TypedValue)> {
         self.mapping.iter().map(|(s, entry)| {
-            (s.as_str(), unsafe {
+            (s.as_str(), {
                 assert_eq!(entry.ty, types::F32);
-                TypedValue::from_inner(TypedValueImpl::FloatRef(entry.ptr as *mut f32))
+                // SAFETY
+                // - ptr points to a storage slot of type f32.
+                //
+                // This is guaranteed by asserting the type and MappedStorage::new
+                // invariants.
+                unsafe { TypedValue::from_inner(TypedValueImpl::FloatRef(entry.ptr as *mut f32)) }
             })
         })
     }

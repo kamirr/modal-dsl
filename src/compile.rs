@@ -51,6 +51,12 @@ impl CompiledProgram {
         let entry = self.storage.get(name).unwrap();
         assert_eq!(entry.ty, types::F32);
         assert_eq!(entry.kind, StorageEntryKind::External);
+        // SAFETY
+        // - ptr points to a valid, aligned f32.
+        // - The access is synchronized.
+        //
+        // This is guaranteed by asserting StorageEntry::ty value, MappedStorage
+        // invariants and the fact that this function takes a mutable reference.
         unsafe {
             (entry.ptr as *mut f32).write(value);
         }
@@ -165,6 +171,10 @@ impl Compiler {
 
         let code = self.module.get_finalized_function(id);
 
+        // SAFETY
+        // - The function signature matches.
+        //
+        // Guaranteed within this function.
         let func = unsafe { std::mem::transmute::<*const u8, fn()>(code) };
 
         Ok(InitBuild {
@@ -221,6 +231,10 @@ impl Compiler {
 
         let code = self.module.get_finalized_function(id);
 
+        // SAFETY
+        // - The function signature matches.
+        //
+        // Guaranteed within this function.
         let func = unsafe { std::mem::transmute::<*const u8, fn() -> f32>(code) };
 
         Ok(func)
@@ -262,7 +276,9 @@ impl Compiler {
             });
         }
 
-        // See MappedStorage::new invariants
+        // SAFETY: See MappedStorage::new invariants
+        //
+        // This is guaranteed by the above algorithm.
         Ok(unsafe { MappedStorage::new(state_mapping, storage) })
     }
 }

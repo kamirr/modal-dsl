@@ -39,20 +39,16 @@ pub struct TypedValue(TypedValueImpl);
 impl TypedValue {
     pub const UNIT: Self = TypedValue(TypedValueImpl::Unit);
 
+    /// SAFETY:
+    /// - If the TypedValueImpl contains a pointer, it must be valid in the
+    ///   context of this specific program and point to the appropriate
+    ///   storage entry.
     pub(crate) unsafe fn from_inner(inner: TypedValueImpl) -> Self {
         TypedValue(inner)
     }
 
     pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
         TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
-    }
-
-    pub unsafe fn ref_this(self, ptr: *mut u8) -> Self {
-        let TypedValue(tvi) = self;
-        TypedValue(match tvi {
-            TypedValueImpl::Float(_) => TypedValueImpl::FloatRef(ptr as *mut f32),
-            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => panic!(),
-        })
     }
 
     pub fn as_ptr(self) -> *mut u8 {
