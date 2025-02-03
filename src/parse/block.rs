@@ -53,7 +53,6 @@ mod tests {
         let_::Let,
         literal::{Literal, LiteralValue},
         path::Ident,
-        var::Var,
         yield_::Yield,
     };
     use pretty_assertions::assert_eq;
@@ -102,15 +101,15 @@ mod tests {
                         .into(),
                         Yield {
                             value: Box::new(Expr::Binop(Binop {
-                                left: Box::new(Expr::Var(Var::new(Ident::new("two", 39..42)))),
-                                right: Box::new(Expr::Var(Var::new(Ident::new("three", 45..50)))),
+                                left: Box::new(Expr::Var(Ident::new("two", 39..42))),
+                                right: Box::new(Expr::Var(Ident::new("three", 45..50))),
                                 op: BinopKind::Div,
                                 span: 39..50,
                             })),
                             span: 33..50,
                         }
                         .into(),
-                        Expr::Var(Var::new(Ident::new("two", 52..55))),
+                        Expr::Var(Ident::new("two", 52..55)),
                     ],
                     ret_last: true,
                     span: 1..58,

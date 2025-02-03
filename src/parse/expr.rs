@@ -15,7 +15,7 @@ use super::{
     call::Call,
     let_::Let,
     literal::Literal,
-    var::Var,
+    path::Ident,
     yield_::Yield,
 };
 
@@ -23,7 +23,7 @@ use super::{
 pub enum Expr {
     Block(Block),
     Call(Call),
-    Var(Var),
+    Var(Ident),
     Let(Let),
     Yield(Yield),
     Literal(Literal),
@@ -39,7 +39,7 @@ impl Expr {
                 .or(Call::parser(expr.clone()).map(Expr::Call))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))
-                .or(Var::parser().map(Expr::Var))
+                .or(Ident::parser().map(Expr::Var))
                 .or(expr.clone().delimited_by(just('('), just(')')))
                 .padded()
                 .boxed();
@@ -94,7 +94,7 @@ impl Expr {
         match self {
             Expr::Block(block) => block.span.clone(),
             Expr::Call(_call) => 0..0,
-            Expr::Var(var) => var.name.span.clone(),
+            Expr::Var(var) => var.span.clone(),
             Expr::Let(let_) => let_.span.clone(),
             Expr::Yield(yield_) => yield_.span.clone(),
             Expr::Literal(literal) => literal.span.clone(),
@@ -118,10 +118,7 @@ mod tests {
     fn test_var() {
         let cases = [("foo", Ident::new("foo", 0..3))];
         for (text, expected) in cases {
-            assert_eq!(
-                Expr::parser(44100.0).parse(text),
-                Ok(Var { name: expected }.into())
-            )
+            assert_eq!(Expr::parser(44100.0).parse(text), Ok(expected.into()))
         }
     }
 
@@ -152,12 +149,7 @@ mod tests {
         let cases = [(
             "yield foo",
             Yield {
-                value: Box::new(
-                    Var {
-                        name: Ident::new("foo", 6..9),
-                    }
-                    .into(),
-                ),
+                value: Box::new(Ident::new("foo", 6..9).into()),
                 span: 0..9,
             },
         )];
@@ -229,12 +221,7 @@ mod tests {
                         }
                         .into(),
                     ),
-                    right: Box::new(
-                        Var {
-                            name: Ident::new("x", 8..9),
-                        }
-                        .into(),
-                    ),
+                    right: Box::new(Ident::new("x", 8..9).into()),
                     op: BinopKind::Add,
                     span: 0..9,
                 },

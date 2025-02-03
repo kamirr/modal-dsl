@@ -15,7 +15,6 @@ pub mod literal;
 pub mod path;
 pub mod state;
 pub mod step;
-pub mod var;
 pub mod yield_;
 
 pub mod kwords {

@@ -7,7 +7,6 @@ use crate::parse::{
     let_::Let,
     literal::{Literal, LiteralValue},
     path::Ident,
-    var::Var,
     yield_::Yield,
 };
 
@@ -47,9 +46,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 self.stack.set(name.name.to_string(), tv);
                 Ok(tv)
             }
-            Expr::Var(Var {
-                name: Ident { name, span },
-            }) => self.stack.get(&name).ok_or_else(|| {
+            Expr::Var(Ident { name, span }) => self.stack.get(&name).ok_or_else(|| {
                 CompileError::new(format!("Variable {} not in scope", name), span.clone())
             }),
             Expr::Block(Block {

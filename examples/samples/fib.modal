@@ -8,7 +8,6 @@ inputs { }
 step {
     yield a;
     
-    let c = a + b;
-    a = b;
-    b = c;
+    b = a + b;
+    a = b - a;
 }
