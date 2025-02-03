@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use cranelift::prelude::FunctionBuilder;
+use cranelift_codegen::ir::FuncRef;
 
 use crate::parse::{
     binop::{Binop, BinopKind},
@@ -11,6 +14,7 @@ use crate::parse::{
 };
 
 use super::{
+    library::ExternFunc,
     typed::{TypedStackSlot, TypedValue},
     varstack::VarStack,
     CompileError,
@@ -20,6 +24,7 @@ pub struct Recursor<'fb, 'b, 'vs> {
     builder: &'fb mut FunctionBuilder<'b>,
     stack: &'vs mut VarStack,
     retss: Option<TypedStackSlot>,
+    extern_funs: HashMap<String, (FuncRef, ExternFunc)>,
 }
 
 impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
@@ -27,11 +32,13 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         builder: &'fb mut FunctionBuilder<'b>,
         stack: &'vs mut VarStack,
         retss: Option<TypedStackSlot>,
+        extern_funs: HashMap<String, (FuncRef, ExternFunc)>,
     ) -> Self {
         Recursor {
             builder,
             stack,
             retss,
+            extern_funs,
         }
     }
 
@@ -101,7 +108,17 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     .stack_store(self.builder, retss)
                     .map_err(|e| CompileError::new(e.msg(), span.clone()))
             }
-            Expr::Call(_call) => todo!(),
+            Expr::Call(call) => {
+                let mut arg_tvs = Vec::new();
+                for arg in &call.args {
+                    arg_tvs.push(self.recurse(arg)?);
+                }
+
+                let (func_ref, func_desc) = self.extern_funs.get(&call.path.0[0].name).unwrap();
+
+                TypedValue::call(self.builder, *func_ref, func_desc, arg_tvs.as_slice())
+                    .map_err(|e| CompileError::new(e.msg(), call.span.clone()))
+            }
         }
     }
 }

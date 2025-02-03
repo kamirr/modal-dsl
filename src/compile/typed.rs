@@ -2,7 +2,9 @@ use cranelift::prelude::{
     types::{F32, I64},
     FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type, Value,
 };
-use cranelift_codegen::ir::StackSlot;
+use cranelift_codegen::ir::{FuncRef, StackSlot};
+
+use super::library::{ExternFunc, ExternType};
 
 #[derive(Clone, Copy, Debug)]
 enum TypedStackSlotImpl {
@@ -37,6 +39,15 @@ pub enum TypedOpError {
         rhs: TypedValue,
         op: &'static str,
     },
+    InvalidCallArgsN {
+        expected: usize,
+        found: usize,
+    },
+    InvaldCallArgTy {
+        expected: ValueType,
+        found: ValueType,
+        arg_n: usize,
+    },
     ClValue {
         this: TypedValue,
     },
@@ -57,7 +68,51 @@ impl TypedOpError {
             TypedOpError::ClValue { this } => {
                 format!("{this:?} does not have a cranelift value")
             }
+            TypedOpError::InvalidCallArgsN { expected, found } => {
+                format!("Expected {expected} arguments, found {found}")
+            }
+            TypedOpError::InvaldCallArgTy {
+                expected,
+                found,
+                arg_n,
+            } => {
+                format!("Argument #{arg_n} expected type {expected:?}, found {found:?}")
+            }
             TypedOpError::ClType { this } => format!("{this:?} does not have a cranelift type"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Ptr {
+    Literal(*mut u8),
+    Value(Value),
+}
+
+impl Ptr {
+    pub(crate) fn value(self, builder: &mut FunctionBuilder<'_>) -> Value {
+        match self {
+            Ptr::Literal(iptr) => builder.ins().iconst(I64, iptr as i64),
+            Ptr::Value(value) => value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValueType {
+    Unit,
+    ExternPtr(ExternType),
+    ExternPtrRef(ExternType),
+    Float,
+    FloatRef,
+}
+
+impl ValueType {
+    pub fn cl_type(self) -> Option<Type> {
+        match self {
+            ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef => Some(I64),
+            ValueType::Float => Some(F32),
+            _ => None,
         }
     }
 }
@@ -65,8 +120,10 @@ impl TypedOpError {
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum TypedValueImpl {
     Unit,
+    ExternPtr(Ptr, ExternType),
+    ExternPtrRef(Ptr, ExternType),
     Float(Value),
-    FloatRef(*mut f32),
+    FloatRef(Ptr),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -90,8 +147,9 @@ impl TypedValue {
     pub fn as_ptr(self) -> *mut u8 {
         let TypedValue(tvi) = self;
         match tvi {
-            TypedValueImpl::FloatRef(ptr) => ptr as *mut u8,
-            TypedValueImpl::Float(_) | TypedValueImpl::Unit => panic!(),
+            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _) => ptr,
+            TypedValueImpl::FloatRef(Ptr::Literal(ptr)) => ptr,
+            _ => panic!(),
         }
     }
 
@@ -211,49 +269,123 @@ impl TypedValue {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
-        let (TypedValueImpl::FloatRef(l), TypedValueImpl::Float(r)) = (l, r) else {
-            return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
-                op: "=",
-            });
-        };
-
-        let ptr = builder.ins().iconst(I64, l as i64);
-        builder.ins().store(MemFlags::trusted(), r, ptr, 0);
+        match (l, r) {
+            (TypedValueImpl::FloatRef(l), TypedValueImpl::Float(r)) => {
+                let ptr = l.value(builder);
+                builder.ins().store(MemFlags::trusted(), r, ptr, 0);
+            }
+            (TypedValueImpl::ExternPtrRef(l, et1), TypedValueImpl::ExternPtr(r, et2)) => {
+                assert_eq!(et1, et2);
+                let ptr = l.value(builder);
+                let rhs = r.value(builder);
+                builder.ins().store(MemFlags::trusted(), rhs, ptr, 0);
+            }
+            _ => {
+                return Err(TypedOpError::InvalidOp {
+                    lhs: self,
+                    rhs: other,
+                    op: "=",
+                });
+            }
+        }
 
         Ok(other)
+    }
+
+    pub fn call(
+        builder: &mut FunctionBuilder<'_>,
+        func: FuncRef,
+        func_desc: &ExternFunc,
+        args: &[TypedValue],
+    ) -> Result<TypedValue, TypedOpError> {
+        if args.len() != func_desc.args.len() {
+            return Err(TypedOpError::InvalidCallArgsN {
+                expected: func_desc.args.len(),
+                found: args.len(),
+            });
+        }
+
+        let mut arg_vs = Vec::new();
+        for (n, (arg_tv, arg_abi)) in args
+            .iter()
+            .copied()
+            .zip(func_desc.args.iter().copied())
+            .enumerate()
+        {
+            let TypedValue(tvi) = arg_tv.autoderef(builder);
+            let arg_v = match (tvi, arg_abi) {
+                (TypedValueImpl::ExternPtr(ptr, et1), ValueType::ExternPtr(et2)) => {
+                    assert_eq!(et1, et2);
+                    ptr.value(builder)
+                }
+                (TypedValueImpl::FloatRef(ptr), ValueType::FloatRef) => ptr.value(builder),
+                (TypedValueImpl::Float(value), ValueType::Float) => value,
+                (tvi, ty) => {
+                    return Err(TypedOpError::InvaldCallArgTy {
+                        expected: ty,
+                        found: TypedValue(tvi).value_type(),
+                        arg_n: n,
+                    })
+                }
+            };
+            arg_vs.push(arg_v);
+        }
+
+        let call = builder.ins().call(func, &arg_vs);
+        match func_desc.ret {
+            None => Ok(TypedValue::UNIT),
+            Some(abi) => {
+                let value = builder.inst_results(call)[0];
+                Ok(TypedValue(match abi {
+                    ValueType::Unit => TypedValueImpl::Unit,
+                    ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Value(value), et),
+                    ValueType::ExternPtrRef(et) => {
+                        TypedValueImpl::ExternPtrRef(Ptr::Value(value), et)
+                    }
+                    ValueType::FloatRef => TypedValueImpl::FloatRef(Ptr::Value(value)),
+                    ValueType::Float => TypedValueImpl::Float(value),
+                }))
+            }
+        }
     }
 
     pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> Self {
         let TypedValue(tvi) = self;
         TypedValue(match tvi {
-            TypedValueImpl::Float(v) => TypedValueImpl::Float(v),
+            TypedValueImpl::ExternPtrRef(ptr, et) => {
+                let ptr = ptr.value(builder);
+                TypedValueImpl::ExternPtr(
+                    Ptr::Value(builder.ins().load(I64, MemFlags::trusted(), ptr, 0)),
+                    et,
+                )
+            }
             TypedValueImpl::FloatRef(ptr) => {
-                let ptr = builder.ins().iconst(I64, ptr as i64);
+                let ptr = ptr.value(builder);
                 TypedValueImpl::Float(builder.ins().load(F32, MemFlags::trusted(), ptr, 0))
             }
-            TypedValueImpl::Unit => TypedValueImpl::Unit,
+            other => other,
         })
+    }
+
+    pub fn value_type(self) -> ValueType {
+        let TypedValue(tvi) = self;
+        match tvi {
+            TypedValueImpl::Unit => ValueType::Unit,
+            TypedValueImpl::ExternPtr(_, et) => ValueType::ExternPtr(et),
+            TypedValueImpl::ExternPtrRef(_, et) => ValueType::ExternPtrRef(et),
+            TypedValueImpl::Float(_) => ValueType::Float,
+            TypedValueImpl::FloatRef(_) => ValueType::FloatRef,
+        }
     }
 
     pub fn value(self) -> Result<Value, TypedOpError> {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Float(v) => Ok(v),
-            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => {
-                Err(TypedOpError::ClValue { this: self })
-            }
-        }
-    }
-
-    pub fn cl_type(self) -> Result<Type, TypedOpError> {
-        let TypedValue(tvi) = self;
-        match tvi {
-            TypedValueImpl::Float(_) => Ok(F32),
-            TypedValueImpl::FloatRef(_) | TypedValueImpl::Unit => {
-                Err(TypedOpError::ClType { this: self })
-            }
+            TypedValueImpl::ExternPtr(Ptr::Value(v), _)
+            | TypedValueImpl::ExternPtrRef(Ptr::Value(v), _)
+            | TypedValueImpl::FloatRef(Ptr::Value(v)) => Ok(v),
+            _ => Err(TypedOpError::ClValue { this: self }),
         }
     }
 }

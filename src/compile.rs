@@ -1,3 +1,4 @@
+pub mod library;
 mod recursor;
 mod storage;
 mod typed;
@@ -9,14 +10,15 @@ use cranelift::{
     jit::{JITBuilder, JITModule},
     module::{default_libcall_names, Linkage, Module},
     prelude::{
-        types::{self, F32},
-        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
+        types::{F32, I64},
+        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
     },
 };
 use cranelift_codegen::{settings, Context};
+use library::Library;
 use recursor::Recursor;
 use storage::{MappedStorage, StorageBuf, StorageEntry, StorageEntryKind};
-use typed::{TypedStackSlot, TypedValue};
+use typed::{TypedStackSlot, TypedValue, ValueType};
 use varstack::VarStack;
 
 use crate::parse::{
@@ -73,7 +75,7 @@ impl CompiledProgram {
 
     pub fn set_f32(&mut self, name: &str, value: f32) {
         let entry = self.storage.get(name).unwrap();
-        assert_eq!(entry.ty, types::F32);
+        assert_eq!(entry.abi, ValueType::Float);
         assert_eq!(entry.kind, StorageEntryKind::External);
         // SAFETY
         // - ptr points to a valid, aligned f32.
@@ -90,10 +92,12 @@ impl CompiledProgram {
 pub struct Compiler {
     module: JITModule,
     module_ctx: Context,
+    stdlib: Library,
+    extern_signatures: HashMap<String, Signature>,
 }
 
 impl Compiler {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(stdlib: Library) -> anyhow::Result<Self> {
         let flags = [
             ("use_colocated_libcalls", "false"),
             ("is_pic", "false"),
@@ -109,12 +113,38 @@ impl Compiler {
         let isa_builder = cranelift_native::builder().map_err(anyhow::Error::msg)?;
 
         let isa = isa_builder.finish(settings::Flags::new(flag_builder))?;
-        let builder = JITBuilder::with_isa(isa, default_libcall_names());
+        let mut builder = JITBuilder::with_isa(isa, default_libcall_names());
+        for (name, ptr) in stdlib.symbols() {
+            builder.symbol(name, ptr);
+        }
 
         let module = JITModule::new(builder);
+
+        let mut extern_signatures = HashMap::new();
+        for (name, func) in stdlib.funcs() {
+            let mut sig = module.make_signature();
+            for arg in &func.args {
+                sig.params.push(AbiParam::new(arg.cl_type().unwrap()));
+            }
+            match func.ret {
+                Some(
+                    ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef,
+                ) => sig.returns.push(AbiParam::new(I64)),
+                Some(ValueType::Float) => sig.returns.push(AbiParam::new(F32)),
+                Some(ValueType::Unit) => panic!(""),
+                None => {}
+            }
+            extern_signatures.insert(name.to_string(), sig);
+        }
+
         let module_ctx = module.make_context();
 
-        Ok(Compiler { module, module_ctx })
+        Ok(Compiler {
+            module,
+            module_ctx,
+            stdlib,
+            extern_signatures,
+        })
     }
 
     pub fn compile(&mut self, program: &Program) -> Result<CompiledProgram, CompileError> {
@@ -143,6 +173,21 @@ impl Compiler {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut self.module_ctx.func, &mut builder_ctx);
 
+        let extern_funs = {
+            let mut tmp = HashMap::new();
+            for (name, sig) in &self.extern_signatures {
+                let callee = self.module.declare_function(&name, Linkage::Import, &sig)?;
+                let fun_ref = self.module.declare_func_in_func(callee, builder.func);
+
+                tmp.insert(
+                    name.to_string(),
+                    (fun_ref, self.stdlib.get_func(name).unwrap().clone()),
+                );
+            }
+
+            tmp
+        };
+
         let block = builder.create_block();
         builder.seal_block(block);
 
@@ -152,7 +197,7 @@ impl Compiler {
         let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind, Range<usize>)>::new();
         for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
-            let mut recursor = Recursor::new(&mut builder, &mut stack, None);
+            let mut recursor = Recursor::new(&mut builder, &mut stack, None, extern_funs.clone());
 
             let init_v = recursor.recurse(init)?;
             storage_tvs.push((
@@ -164,7 +209,7 @@ impl Compiler {
         }
         for InputEntry { name, default, .. } in &program.inputs().entries {
             let mut stack = VarStack::new();
-            let mut recursor = Recursor::new(&mut builder, &mut stack, None);
+            let mut recursor = Recursor::new(&mut builder, &mut stack, None, extern_funs.clone());
 
             let default = default
                 .clone()
@@ -234,6 +279,21 @@ impl Compiler {
         let mut builder_ctx = FunctionBuilderContext::new();
         let mut builder = FunctionBuilder::new(&mut self.module_ctx.func, &mut builder_ctx);
 
+        let extern_funs = {
+            let mut tmp = HashMap::new();
+            for (name, sig) in &self.extern_signatures {
+                let callee = self.module.declare_function(&name, Linkage::Import, &sig)?;
+                let fun_ref = self.module.declare_func_in_func(callee, builder.func);
+
+                tmp.insert(
+                    name.to_string(),
+                    (fun_ref, self.stdlib.get_func(name).unwrap().clone()),
+                );
+            }
+
+            tmp
+        };
+
         let block = builder.create_block();
         builder.seal_block(block);
 
@@ -247,7 +307,8 @@ impl Compiler {
 
         let retss = TypedStackSlot::float()(&mut builder);
 
-        let mut recursor = Recursor::new(&mut builder, &mut stack, Some(retss));
+        let mut recursor =
+            Recursor::new(&mut builder, &mut stack, Some(retss), extern_funs.clone());
         for expr in &program.step().block.exprs {
             recursor.recurse(expr)?;
         }
@@ -282,9 +343,12 @@ impl Compiler {
         let mut offsets = HashMap::new();
 
         for (name, tv, _kind, span) in entries {
-            let abi_type = tv
-                .cl_type()
-                .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
+            let abi_type = tv.value_type().cl_type().ok_or_else(|| {
+                CompileError::new(
+                    format!("{tv:?} doesn't have a corresponding CL type"),
+                    span.clone(),
+                )
+            })?;
 
             // Assumption that align is the same as size is overly restrictive
             let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
@@ -301,13 +365,11 @@ impl Compiler {
         let storage_len = offset;
         let storage = StorageBuf::new(storage_len);
 
-        for (name, tv, kind, span) in entries {
+        for (name, tv, kind, _span) in entries {
             let offset = offsets.get(name).unwrap();
             state_mapping.insert(name.clone(), unsafe {
                 StorageEntry {
-                    ty: tv
-                        .cl_type()
-                        .map_err(|e| CompileError::new(e.msg(), span.clone()))?,
+                    abi: tv.value_type(),
                     kind: *kind,
                     ptr: storage.get(*offset).as_ptr() as *mut u8,
                 }

@@ -4,9 +4,9 @@ use std::{
     ptr::NonNull,
 };
 
-use cranelift::prelude::{types, Type};
+use crate::compile::typed::Ptr;
 
-use super::typed::{TypedValue, TypedValueImpl};
+use super::typed::{TypedValue, TypedValueImpl, ValueType};
 
 #[derive(Debug)]
 pub struct StorageBuf {
@@ -79,7 +79,7 @@ pub enum StorageEntryKind {
 
 #[derive(Debug, Clone, Copy)]
 pub struct StorageEntry {
-    pub ty: Type,
+    pub abi: ValueType,
     pub kind: StorageEntryKind,
     pub ptr: *mut u8,
 }
@@ -112,13 +112,19 @@ impl MappedStorage {
     pub fn typed_values(&self) -> impl Iterator<Item = (&str, TypedValue)> {
         self.mapping.iter().map(|(s, entry)| {
             (s.as_str(), {
-                assert_eq!(entry.ty, types::F32);
                 // SAFETY
-                // - ptr points to a storage slot of type f32.
+                // - ptr points to a valid storage slot.
                 //
-                // This is guaranteed by asserting the type and MappedStorage::new
-                // invariants.
-                unsafe { TypedValue::from_inner(TypedValueImpl::FloatRef(entry.ptr as *mut f32)) }
+                // This is guaranteed by `MappedStorage::new` invariants.
+                unsafe {
+                    TypedValue::from_inner(match entry.abi {
+                        ValueType::ExternPtr(extern_type) => {
+                            TypedValueImpl::ExternPtrRef(Ptr::Literal(entry.ptr), extern_type)
+                        }
+                        ValueType::Float => TypedValueImpl::FloatRef(Ptr::Literal(entry.ptr)),
+                        _ => unreachable!(),
+                    })
+                }
             })
         })
     }

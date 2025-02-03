@@ -3,6 +3,7 @@ use std::time::Instant;
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::error::Simple;
 use chumsky::Parser;
+use modal_dsl::compile::library::stdlib;
 use modal_dsl::compile::{CompileError, Compiler};
 use modal_dsl::parse::Program;
 
@@ -23,7 +24,8 @@ fn main() {
     println!("parsing took {:.2}ms", now.elapsed().as_secs_f32() * 1000.0);
 
     let now = Instant::now();
-    let mut compiler = Compiler::new().unwrap();
+    let stdlib = stdlib::stdlib();
+    let mut compiler = Compiler::new(stdlib).unwrap();
     let mut compiled = match compiler.compile(&program.unwrap()) {
         Ok(prog) => prog,
         Err(error) => {

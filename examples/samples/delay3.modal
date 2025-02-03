@@ -1,7 +1,11 @@
 state {
-    y0 = 0,
-    y1 = 0,
-    y2 = 0,
+    buffer3 = {
+        let b = buffer_new();
+        buffer_push(b, 0.0);
+        buffer_push(b, 0.0);
+        buffer_push(b, 0.0);
+        b
+    }
 }
 
 inputs {
@@ -9,8 +13,6 @@ inputs {
 }
 
 step {
-    yield y0;
-    y0 = y1;
-    y1 = y2;
-    y2 = in;
+    yield buffer_pop(buffer3);
+    buffer_push(buffer3, in);
 }

@@ -1,7 +1,19 @@
-state { }
-inputs { }
+state {
+    buffer3 = {
+        let x = buffer_new();
+        buffer_push(x, 0.0);
+        buffer_push(x, 0.0);
+        buffer_push(x, 0.0);
+        x
+    }
+}
+
+inputs {
+    in: sig,
+}
 
 step {
-    let a = 2;
-    a = 3;
+    yield buffer_pop(buffer3);
+    let x = in;
+    buffer_push(buffer3, buffer3);
 }
