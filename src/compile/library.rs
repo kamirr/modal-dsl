@@ -71,6 +71,64 @@ pub mod stdlib {
     use super::*;
     use std::collections::VecDeque;
 
+    fn math(library: &mut Library) {
+        extern "C" fn sin(x: f32) -> f32 {
+            x.sin()
+        }
+
+        extern "C" fn cos(x: f32) -> f32 {
+            x.cos()
+        }
+
+        extern "C" fn tan(x: f32) -> f32 {
+            x.tan()
+        }
+
+        extern "C" fn abs(x: f32) -> f32 {
+            x.abs()
+        }
+
+        extern "C" fn sqrt(x: f32) -> f32 {
+            x.sqrt()
+        }
+
+        for (name, ptr) in [
+            ("sin", sin as extern "C" fn(f32) -> f32),
+            ("cos", cos),
+            ("tan", tan),
+            ("abs", abs),
+            ("sqrt", sqrt),
+        ] {
+            unsafe {
+                library.insert_func(
+                    name,
+                    ExternFunc::new(
+                        vec![ValueType::Float],
+                        Some(ValueType::Float),
+                        ptr as *const u8,
+                    ),
+                );
+            }
+        }
+
+        extern "C" fn pow(a: f32, b: f32) -> f32 {
+            a.powf(b)
+        }
+
+        for (name, ptr) in [("pow", pow as extern "C" fn(f32, f32) -> f32)] {
+            unsafe {
+                library.insert_func(
+                    name,
+                    ExternFunc::new(
+                        vec![ValueType::Float, ValueType::Float],
+                        Some(ValueType::Float),
+                        ptr as *const u8,
+                    ),
+                );
+            }
+        }
+    }
+
     fn buffer(library: &mut Library) {
         extern "C" fn buffer_new() -> &'static mut VecDeque<f32> {
             Box::leak(Box::new(VecDeque::new()))
@@ -117,6 +175,7 @@ pub mod stdlib {
 
     pub fn stdlib() -> Library {
         let mut library = Library::new();
+        math(&mut library);
         buffer(&mut library);
 
         library

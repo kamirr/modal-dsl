@@ -1,0 +1,8 @@
+state { }
+inputs {
+    in: sig,
+}
+
+step {
+    yield sin(in) + cos(in) + tan(in) + sqrt(abs(in)) + pow(in, 2);
+}
