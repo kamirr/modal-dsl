@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use super::typed::ValueType;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExternType(u32);
 
 #[derive(Debug, Default)]

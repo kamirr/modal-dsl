@@ -18,7 +18,7 @@ use cranelift_codegen::{settings, Context};
 use library::Library;
 use recursor::Recursor;
 use storage::{MappedStorage, StorageBuf, StorageEntry, StorageEntryKind};
-use typed::{TypedStackSlot, TypedValue, ValueType};
+use typed::{LoadCache, TypedStackSlot, TypedValue, ValueType};
 use varstack::VarStack;
 
 use crate::parse::{
@@ -235,7 +235,9 @@ impl Compiler {
                 .find_map(|(id, init_v, _kind, _span)| (id == name).then_some(*init_v))
                 .unwrap();
 
-            ptr_v.assign(&mut builder, init_v).unwrap();
+            LoadCache::default()
+                .store(&mut builder, ptr_v, init_v)
+                .unwrap();
         }
 
         builder.ins().return_(&[]);

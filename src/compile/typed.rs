@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use cranelift::prelude::{
     types::{F32, I64},
     FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type, Value,
@@ -83,7 +85,84 @@ impl TypedOpError {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug, Default)]
+pub struct LoadCache {
+    entries: HashMap<TypedValue, TypedValue>,
+}
+
+impl LoadCache {
+    pub fn autoderef(&mut self, builder: &mut FunctionBuilder<'_>, tv: TypedValue) -> TypedValue {
+        if let Some(&cached) = self.entries.get(&tv) {
+            println!("cached: *{tv:?} = {cached:?}");
+            return cached;
+        }
+
+        let TypedValue(tvi) = tv;
+        let result = TypedValue(match tvi {
+            TypedValueImpl::ExternPtrRef(ptr, et) => {
+                let ptr = ptr.value(builder);
+                TypedValueImpl::ExternPtr(
+                    Ptr::Value(builder.ins().load(I64, MemFlags::trusted(), ptr, 0)),
+                    et,
+                )
+            }
+            TypedValueImpl::FloatRef(ptr) => {
+                let ptr = ptr.value(builder);
+                TypedValueImpl::Float(builder.ins().load(F32, MemFlags::trusted(), ptr, 0))
+            }
+            other => return TypedValue(other),
+        });
+
+        println!("record: *{tv:?} = {result:?}");
+        self.entries.insert(tv, result);
+        result
+    }
+
+    pub fn store(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        dst: TypedValue,
+        src: TypedValue,
+    ) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(dsti) = dst;
+        let TypedValue(srci) = src;
+
+        let clear_all;
+        match (dsti, srci) {
+            (TypedValueImpl::FloatRef(dst_ptr), TypedValueImpl::Float(src_v)) => {
+                clear_all = matches!(dst_ptr, Ptr::Value(_));
+                let ptr = dst_ptr.value(builder);
+                builder.ins().store(MemFlags::trusted(), src_v, ptr, 0);
+            }
+            (TypedValueImpl::ExternPtrRef(dst_ptr, et1), TypedValueImpl::ExternPtr(src_v, et2)) => {
+                clear_all = matches!(dst_ptr, Ptr::Value(_));
+                assert_eq!(et1, et2);
+                let ptr = dst_ptr.value(builder);
+                let src_v = src_v.value(builder);
+                builder.ins().store(MemFlags::trusted(), src_v, ptr, 0);
+            }
+            _ => {
+                return Err(TypedOpError::InvalidOp {
+                    lhs: dst,
+                    rhs: src,
+                    op: "=",
+                });
+            }
+        }
+
+        if clear_all {
+            println!("clear cache: all");
+            self.entries.clear();
+        } else {
+            println!("clear cache: {dst:?}");
+            self.entries.remove(&dst);
+        }
+
+        Ok(src)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Ptr {
     Literal(*mut u8),
     Value(Value),
@@ -98,7 +177,7 @@ impl Ptr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ValueType {
     Unit,
     ExternPtr(ExternType),
@@ -117,7 +196,7 @@ impl ValueType {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TypedValueImpl {
     Unit,
     ExternPtr(Ptr, ExternType),
@@ -126,7 +205,7 @@ pub(crate) enum TypedValueImpl {
     FloatRef(Ptr),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TypedValue(TypedValueImpl);
 
 impl TypedValue {
@@ -261,37 +340,6 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn assign(
-        self,
-        builder: &mut FunctionBuilder<'_>,
-        other: Self,
-    ) -> Result<TypedValue, TypedOpError> {
-        let TypedValue(l) = self;
-        let TypedValue(r) = other;
-
-        match (l, r) {
-            (TypedValueImpl::FloatRef(l), TypedValueImpl::Float(r)) => {
-                let ptr = l.value(builder);
-                builder.ins().store(MemFlags::trusted(), r, ptr, 0);
-            }
-            (TypedValueImpl::ExternPtrRef(l, et1), TypedValueImpl::ExternPtr(r, et2)) => {
-                assert_eq!(et1, et2);
-                let ptr = l.value(builder);
-                let rhs = r.value(builder);
-                builder.ins().store(MemFlags::trusted(), rhs, ptr, 0);
-            }
-            _ => {
-                return Err(TypedOpError::InvalidOp {
-                    lhs: self,
-                    rhs: other,
-                    op: "=",
-                });
-            }
-        }
-
-        Ok(other)
-    }
-
     pub fn call(
         builder: &mut FunctionBuilder<'_>,
         func: FuncRef,
@@ -312,7 +360,7 @@ impl TypedValue {
             .zip(func_desc.args.iter().copied())
             .enumerate()
         {
-            let TypedValue(tvi) = arg_tv.autoderef(builder);
+            let TypedValue(tvi) = arg_tv;
             let arg_v = match (tvi, arg_abi) {
                 (TypedValueImpl::ExternPtr(ptr, et1), ValueType::ExternPtr(et2)) => {
                     assert_eq!(et1, et2);
@@ -347,24 +395,6 @@ impl TypedValue {
                 }))
             }
         }
-    }
-
-    pub fn autoderef(self, builder: &mut FunctionBuilder<'_>) -> Self {
-        let TypedValue(tvi) = self;
-        TypedValue(match tvi {
-            TypedValueImpl::ExternPtrRef(ptr, et) => {
-                let ptr = ptr.value(builder);
-                TypedValueImpl::ExternPtr(
-                    Ptr::Value(builder.ins().load(I64, MemFlags::trusted(), ptr, 0)),
-                    et,
-                )
-            }
-            TypedValueImpl::FloatRef(ptr) => {
-                let ptr = ptr.value(builder);
-                TypedValueImpl::Float(builder.ins().load(F32, MemFlags::trusted(), ptr, 0))
-            }
-            other => other,
-        })
     }
 
     pub fn value_type(self) -> ValueType {

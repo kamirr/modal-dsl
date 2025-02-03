@@ -15,7 +15,7 @@ use crate::parse::{
 
 use super::{
     library::ExternFunc,
-    typed::{TypedStackSlot, TypedValue},
+    typed::{LoadCache, TypedStackSlot, TypedValue},
     varstack::VarStack,
     CompileError,
 };
@@ -25,6 +25,7 @@ pub struct Recursor<'fb, 'b, 'vs> {
     stack: &'vs mut VarStack,
     retss: Option<TypedStackSlot>,
     extern_funs: HashMap<String, (FuncRef, ExternFunc)>,
+    load_cache: LoadCache,
 }
 
 impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
@@ -39,6 +40,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             stack,
             retss,
             extern_funs,
+            load_cache: Default::default(),
         }
     }
 
@@ -81,11 +83,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
                 match op {
                     Add | Sub | Mul | Div => {
-                        l = l.autoderef(self.builder);
-                        r = r.autoderef(self.builder);
+                        l = self.load_cache.autoderef(self.builder, l);
+                        r = self.load_cache.autoderef(self.builder, r);
                     }
                     Assign => {
-                        r = r.autoderef(self.builder);
+                        r = self.load_cache.autoderef(self.builder, r);
                     }
                 }
 
@@ -94,7 +96,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     Sub => l.sub(self.builder, r),
                     Mul => l.mul(self.builder, r),
                     Div => l.div(self.builder, r),
-                    Assign => l.assign(self.builder, r),
+                    Assign => self.load_cache.store(self.builder, l, r),
                 }
                 .map_err(|e| CompileError::new(e.msg(), span.clone()))
             }
@@ -104,14 +106,16 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 };
 
                 let tv = self.recurse(value)?;
-                tv.autoderef(self.builder)
+                self.load_cache
+                    .autoderef(self.builder, tv)
                     .stack_store(self.builder, retss)
                     .map_err(|e| CompileError::new(e.msg(), span.clone()))
             }
             Expr::Call(call) => {
                 let mut arg_tvs = Vec::new();
                 for arg in &call.args {
-                    arg_tvs.push(self.recurse(arg)?);
+                    let arg_tv = self.recurse(arg)?;
+                    arg_tvs.push(self.load_cache.autoderef(self.builder, arg_tv));
                 }
 
                 let (func_ref, func_desc) = self.extern_funs.get(&call.path.0[0].name).unwrap();

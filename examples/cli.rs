@@ -41,9 +41,13 @@ fn main() {
     println!("State mapping: {:#?}", compiled);
 
     compiled.init();
-    for k in 0..12 {
-        println!("[{k:02}]: {}", compiled.step());
+    println!("result: {}", compiled.step());
+
+    let now = Instant::now();
+    for _ in 0..44100 {
+        compiled.step();
     }
+    println!("perf coefficient: {}", 1.0 / now.elapsed().as_secs_f32());
 }
 
 fn report_parse_errors(errs: &[Simple<char>], src: &str) {
