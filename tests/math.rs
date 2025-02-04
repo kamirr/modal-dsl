@@ -11,12 +11,12 @@ fn test_42() {
 
     let prog = Program::parser().parse(text.as_str()).unwrap();
     let mut compiler = Compiler::new(stdlib()).unwrap();
-    let mut compiled = compiler.compile(&prog).unwrap();
+    let compiled = compiler.compile(&prog).unwrap();
 
-    compiled.init();
+    let mut ready = compiled.init();
 
     let x = -2.0;
-    compiled.set_f32("in", x);
+    ready.set_f32("in", x);
     let expected = x.sin() + x.cos() + x.tan() + x.abs().sqrt() + x.powf(2.0);
-    assert_eq!(compiled.step(), expected);
+    assert_eq!(ready.step(), expected);
 }

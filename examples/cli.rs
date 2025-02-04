@@ -8,11 +8,13 @@ use modal_dsl::compile::{CompileError, Compiler};
 use modal_dsl::parse::Program;
 
 fn main() {
+    env_logger::init();
+
     let args: Vec<String> = std::env::args().collect();
     let text = std::fs::read(&args[1]).unwrap();
     let src = String::from_utf8(text).unwrap();
 
-    println!("{src}");
+    log::debug!("Code:\n{src}");
 
     let now = Instant::now();
     let (program, errs) = Program::parser().parse_recovery(src.clone());
@@ -20,34 +22,37 @@ fn main() {
     if errs.len() > 0 {
         return;
     }
-
-    println!("parsing took {:.2}ms", now.elapsed().as_secs_f32() * 1000.0);
+    let parse_ms = now.elapsed().as_secs_f32() * 1000.0;
 
     let now = Instant::now();
     let stdlib = stdlib::stdlib();
     let mut compiler = Compiler::new(stdlib).unwrap();
-    let mut compiled = match compiler.compile(&program.unwrap()) {
+    let compiled = match compiler.compile(&program.unwrap()) {
         Ok(prog) => prog,
         Err(error) => {
             report_compile_error(error, &src);
             return;
         }
     };
-    println!(
-        "compilation took {:.2}ms",
-        now.elapsed().as_secs_f32() * 1000.0
-    );
+    let compile_ms = now.elapsed().as_secs_f32() * 1000.0;
+    log::debug!("State mapping: {:#?}", compiled);
 
-    println!("State mapping: {:#?}", compiled);
-
-    compiled.init();
-    println!("result: {}", compiled.step());
+    let mut ready = compiled.init();
+    log::info!("result: {}", ready.step());
 
     let now = Instant::now();
     for _ in 0..44100 {
-        compiled.step();
+        ready.step();
     }
-    println!("perf coefficient: {}", 1.0 / now.elapsed().as_secs_f32());
+    let sim_1s_ms = now.elapsed().as_secs_f32();
+
+    log::info!("parsing took {parse_ms:.2}ms");
+    log::info!("compilation took {compile_ms:.2}ms");
+    log::info!(
+        "perf coefficient: {}, 1s of eval took {:.2}ms",
+        1.0 / sim_1s_ms,
+        sim_1s_ms
+    );
 }
 
 fn report_parse_errors(errs: &[Simple<char>], src: &str) {

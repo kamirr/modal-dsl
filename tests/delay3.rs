@@ -11,18 +11,18 @@ fn test_delay3() {
 
     let prog = Program::parser().parse(text.as_str()).unwrap();
     let mut compiler = Compiler::new(stdlib()).unwrap();
-    let mut compiled = compiler.compile(&prog).unwrap();
+    let compiled = compiler.compile(&prog).unwrap();
 
-    compiled.init();
+    let mut ready = compiled.init();
 
-    compiled.set_f32("in", 1.0);
-    assert_eq!(compiled.step(), 0.0);
-    compiled.set_f32("in", 2.0);
-    assert_eq!(compiled.step(), 0.0);
-    compiled.set_f32("in", 3.0);
-    assert_eq!(compiled.step(), 0.0);
-    assert_eq!(compiled.step(), 1.0);
-    assert_eq!(compiled.step(), 2.0);
-    assert_eq!(compiled.step(), 3.0);
-    assert_eq!(compiled.step(), 3.0);
+    ready.set_f32("in", 1.0);
+    assert_eq!(ready.step(), 0.0);
+    ready.set_f32("in", 2.0);
+    assert_eq!(ready.step(), 0.0);
+    ready.set_f32("in", 3.0);
+    assert_eq!(ready.step(), 0.0);
+    assert_eq!(ready.step(), 1.0);
+    assert_eq!(ready.step(), 2.0);
+    assert_eq!(ready.step(), 3.0);
+    assert_eq!(ready.step(), 3.0);
 }

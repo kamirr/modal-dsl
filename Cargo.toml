@@ -12,9 +12,11 @@ cranelift = { version = "0.116.1", features = ["jit", "module"] }
 cranelift-codegen = "0.116.1"
 cranelift-native = "0.116.1"
 derive_more = { version = "1.0.0", features = ["from"] }
+log = "0.4.25"
 
 [dev-dependencies]
 ariadne = "0.5.0"
+env_logger = "0.11.6"
 pretty_assertions = "1.4.1"
 
 [profile.release]

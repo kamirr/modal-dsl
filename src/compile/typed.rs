@@ -93,7 +93,7 @@ pub struct LoadCache {
 impl LoadCache {
     pub fn autoderef(&mut self, builder: &mut FunctionBuilder<'_>, tv: TypedValue) -> TypedValue {
         if let Some(&cached) = self.entries.get(&tv) {
-            println!("cached: *{tv:?} = {cached:?}");
+            log::debug!("re-used load: *{tv:?} = {cached:?}");
             return cached;
         }
 
@@ -113,7 +113,7 @@ impl LoadCache {
             other => return TypedValue(other),
         });
 
-        println!("record: *{tv:?} = {result:?}");
+        log::debug!("cached load: *{tv:?} = {result:?}");
         self.entries.insert(tv, result);
         result
     }
@@ -151,10 +151,10 @@ impl LoadCache {
         }
 
         if clear_all {
-            println!("clear cache: all");
+            log::debug!("clear load cache: all");
             self.entries.clear();
         } else {
-            println!("clear cache: {dst:?}");
+            log::debug!("clear load cache: {dst:?}");
             self.entries.remove(&dst);
         }
 

@@ -11,8 +11,8 @@ fn test_42() {
 
     let prog = Program::parser().parse(text.as_str()).unwrap();
     let mut compiler = Compiler::new(stdlib()).unwrap();
-    let mut compiled = compiler.compile(&prog).unwrap();
+    let compiled = compiler.compile(&prog).unwrap();
 
-    compiled.init();
-    assert_eq!(compiled.step(), 42.0);
+    let mut ready = compiled.init();
+    assert_eq!(ready.step(), 42.0);
 }

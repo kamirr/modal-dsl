@@ -60,10 +60,22 @@ pub struct CompiledProgram {
 }
 
 impl CompiledProgram {
-    pub fn init(&mut self) {
-        (self.init)()
+    pub fn init(self) -> ReadyProgram {
+        (self.init)();
+        ReadyProgram {
+            storage: self.storage,
+            step: self.step,
+        }
     }
+}
 
+#[derive(Debug)]
+pub struct ReadyProgram {
+    pub storage: Arc<MappedStorage>,
+    step: fn() -> f32,
+}
+
+impl ReadyProgram {
     pub fn step(&mut self) -> f32 {
         (self.step)()
     }
@@ -222,7 +234,7 @@ impl Compiler {
 
         builder.ins().return_(&[]);
 
-        println!("init:\n{}", builder.func.display());
+        log::debug!("init IR:\n{}", builder.func.display());
         builder.finalize();
 
         self.module.define_function(id, &mut self.module_ctx)?;
@@ -298,7 +310,7 @@ impl Compiler {
         let read_ret = TypedValue::stack_load(&mut builder, retss).value().unwrap();
         builder.ins().return_(&[read_ret]);
 
-        println!("step:\n{}", builder.func.display());
+        log::debug!("step IR:\n{}", builder.func.display());
         builder.finalize();
 
         self.module.define_function(id, &mut self.module_ctx)?;

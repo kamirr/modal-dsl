@@ -11,11 +11,11 @@ fn test_fib() {
 
     let prog = Program::parser().parse(text.as_str()).unwrap();
     let mut compiler = Compiler::new(stdlib()).unwrap();
-    let mut compiled = compiler.compile(&prog).unwrap();
+    let compiled = compiler.compile(&prog).unwrap();
 
-    compiled.init();
+    let mut ready = compiled.init();
     let expected = [1.0, 1.0, 2.0, 3.0, 5.0, 8.0, 13.0];
     for value in expected {
-        assert_eq!(compiled.step(), value);
+        assert_eq!(ready.step(), value);
     }
 }
