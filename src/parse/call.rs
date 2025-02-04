@@ -150,7 +150,7 @@ mod tests {
         for (texts, expected) in cases {
             for &text in texts {
                 assert_eq!(
-                    Expr::parser(44100.0).parse(text),
+                    Expr::parser().parse(text),
                     Ok(Expr::Call(expected.clone()))
                 )
             }

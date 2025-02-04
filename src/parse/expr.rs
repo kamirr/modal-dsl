@@ -31,9 +31,9 @@ pub enum Expr {
 }
 
 impl Expr {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         recursive::recursive(|expr| {
-            let atom = Literal::parser(sample_rate)
+            let atom = Literal::parser()
                 .map(Expr::Literal)
                 .or(Block::parser(expr.clone()).map(Expr::Block))
                 .or(Call::parser(expr.clone()).map(Expr::Call))
@@ -118,7 +118,7 @@ mod tests {
     fn test_var() {
         let cases = [("foo", Ident::new("foo", 0..3))];
         for (text, expected) in cases {
-            assert_eq!(Expr::parser(44100.0).parse(text), Ok(expected.into()))
+            assert_eq!(Expr::parser().parse(text), Ok(expected.into()))
         }
     }
 
@@ -140,7 +140,7 @@ mod tests {
         )];
 
         for (text, expected) in cases {
-            assert_eq!(Expr::parser(44100.0).parse(text), Ok(Expr::Let(expected)));
+            assert_eq!(Expr::parser().parse(text), Ok(Expr::Let(expected)));
         }
     }
 
@@ -155,7 +155,7 @@ mod tests {
         )];
 
         for (text, expected) in cases {
-            assert_eq!(Expr::parser(44100.0).parse(text), Ok(Expr::Yield(expected)));
+            assert_eq!(Expr::parser().parse(text), Ok(Expr::Yield(expected)));
         }
     }
 
@@ -230,10 +230,7 @@ mod tests {
 
         for (texts, expected) in cases {
             for text in texts {
-                assert_eq!(
-                    Expr::parser(44100.0).parse(*text),
-                    Ok(expected.clone().into())
-                )
+                assert_eq!(Expr::parser().parse(*text), Ok(expected.clone().into()))
             }
         }
     }

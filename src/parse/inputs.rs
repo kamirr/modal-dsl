@@ -1,48 +1,55 @@
 use std::ops::Range;
 
-use chumsky::{error::Simple, prelude::just, text::whitespace, Parser};
+use chumsky::{
+    error::Simple,
+    prelude::{just, one_of},
+    text::{whitespace, TextParser},
+    Parser,
+};
 
-use super::{literal::Literal, path::Ident};
+use super::path::Ident;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct InputEntry {
     pub name: Ident,
     pub ty: Ident,
-    pub default: Option<Literal>,
+    pub args: Vec<String>,
     pub span: Range<usize>,
 }
 
 impl InputEntry {
     #[cfg(test)]
-    pub fn new(name: Ident, ty: Ident, default: Option<Literal>, span: Range<usize>) -> Self {
+    pub fn new(name: Ident, ty: Ident, args: Vec<String>, span: Range<usize>) -> Self {
         InputEntry {
             name,
             ty,
-            default,
+            args,
             span,
         }
     }
 
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+        let arg = one_of("(), \n\t").not().padded().repeated().at_least(1);
         Ident::parser()
-            .then_ignore(whitespace())
-            .then_ignore(just(":"))
-            .then_ignore(whitespace())
+            .then_ignore(just("=").padded())
             .then(Ident::parser())
+            .then_ignore(just("(").padded())
             .then(
-                whitespace()
-                    .ignored()
-                    .then_ignore(just("="))
-                    .then_ignore(whitespace())
-                    .then(Literal::parser(sample_rate))
-                    .map(|((), value)| value)
-                    .or_not(),
+                arg.clone()
+                    .then_ignore(just(",").padded())
+                    .repeated()
+                    .then(arg.or_not())
+                    .boxed(),
             )
-            .map_with_span(|((name, ty), default), span| (name, ty, default, span))
-            .map(|(name, ty, default, span)| InputEntry {
+            .then_ignore(just(")").padded())
+            .map_with_span(|((name, ty), (args, tail)), span| InputEntry {
                 name,
                 ty,
-                default,
+                args: args
+                    .into_iter()
+                    .chain(tail.into_iter())
+                    .map(|vc| vc.into_iter().collect())
+                    .collect(),
                 span,
             })
     }
@@ -55,14 +62,14 @@ pub struct Inputs {
 }
 
 impl Inputs {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         just("inputs")
             .ignored()
             .then_ignore(whitespace())
             .then_ignore(just("{"))
             .then_ignore(whitespace())
             .then(
-                InputEntry::parser(sample_rate)
+                InputEntry::parser()
                     .then_ignore(whitespace())
                     .then(just(","))
                     .then_ignore(whitespace())
@@ -70,7 +77,7 @@ impl Inputs {
                     .repeated(),
             )
             .map(|((), entries)| entries)
-            .then(InputEntry::parser(sample_rate).or_not())
+            .then(InputEntry::parser().or_not())
             .then_ignore(whitespace())
             .then_ignore(just("}"))
             .map_with_span(|(mut entries, last_entry), span| {
@@ -86,44 +93,42 @@ impl Inputs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::literal::LiteralValue;
     use pretty_assertions::assert_eq;
 
     #[test]
     fn test_input_entry() {
         let cases = [
             (
-                "foo:sig",
-                InputEntry::new(Ident::new("foo", 0..3), Ident::new("sig", 4..7), None, 0..7),
-            ),
-            (
-                "foo: percentage=3%",
+                "foo = sig()",
                 InputEntry::new(
                     Ident::new("foo", 0..3),
-                    Ident::new("percentage", 5..15),
-                    Some(Literal {
-                        value: LiteralValue::Float(0.03),
-                        span: 16..18,
-                    }),
-                    0..18,
+                    Ident::new("sig", 6..9),
+                    vec![],
+                    0..11,
                 ),
             ),
             (
-                "delay: time = 24ms",
+                "foo = percentage(3%)",
+                InputEntry::new(
+                    Ident::new("foo", 0..3),
+                    Ident::new("percentage", 6..16),
+                    vec!["3%".into()],
+                    0..20,
+                ),
+            ),
+            (
+                "delay = time(24ms)",
                 InputEntry::new(
                     Ident::new("delay", 0..5),
-                    Ident::new("time", 7..11),
-                    Some(Literal {
-                        value: LiteralValue::Float(24.0 * 44100.0 / 1000.0),
-                        span: 14..18,
-                    }),
+                    Ident::new("time", 8..12),
+                    vec!["24ms".into()],
                     0..18,
                 ),
             ),
         ];
 
         for (text, expected) in cases {
-            assert_eq!(InputEntry::parser(44100.0).parse(text), Ok(expected));
+            assert_eq!(InputEntry::parser().parse(text), Ok(expected));
         }
     }
 
@@ -131,53 +136,47 @@ mod tests {
     fn test_inputs() {
         let cases = [
             (
-                "inputs{x:sig}",
+                "inputs{x=sig()}",
                 Inputs {
                     entries: vec![InputEntry::new(
                         Ident::new("x", 7..8),
                         Ident::new("sig", 9..12),
-                        None,
-                        7..12,
+                        vec![],
+                        7..14,
                     )],
-                    span: 0..13,
+                    span: 0..15,
                 },
             ),
             (
-                "inputs{\ns:sig,\n feedback:percentage = 20% ,\ndelay : time = 20ms,}",
+                "inputs{\ns=sig(),\n feedback=percentage( 20%) ,\ndelay = time (20ms, )}",
                 Inputs {
                     entries: vec![
                         InputEntry::new(
                             Ident::new("s", 8..9),
                             Ident::new("sig", 10..13),
-                            None,
-                            8..13,
+                            vec![],
+                            8..15,
                         ),
                         InputEntry::new(
-                            Ident::new("feedback", 16..24),
-                            Ident::new("percentage", 25..35),
-                            Some(Literal {
-                                value: LiteralValue::Float(0.2),
-                                span: 38..41,
-                            }),
-                            16..41,
+                            Ident::new("feedback", 18..26),
+                            Ident::new("percentage", 27..37),
+                            vec!["20%".into()],
+                            18..44,
                         ),
                         InputEntry::new(
-                            Ident::new("delay", 44..49),
-                            Ident::new("time", 52..56),
-                            Some(Literal {
-                                value: LiteralValue::Float(882.0),
-                                span: 59..63,
-                            }),
-                            44..63,
+                            Ident::new("delay", 46..51),
+                            Ident::new("time", 54..58),
+                            vec!["20ms".into()],
+                            46..67,
                         ),
                     ],
-                    span: 0..65,
+                    span: 0..68,
                 },
             ),
         ];
 
         for (text, expected) in cases {
-            assert_eq!(Inputs::parser(44100.0).parse(text), Ok(expected));
+            assert_eq!(Inputs::parser().parse(text), Ok(expected));
         }
     }
 }

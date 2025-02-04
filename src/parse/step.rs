@@ -11,11 +11,11 @@ pub struct Step {
 }
 
 impl Step {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         just("step")
             .ignored()
             .then_ignore(whitespace())
-            .then(Expr::parser(sample_rate))
+            .then(Expr::parser())
             .map(|((), blk)| blk)
             .try_map(|expr, span| {
                 if let Expr::Block(blk) = expr {
@@ -125,7 +125,7 @@ mod tests {
         ];
 
         for (text, expected) in cases {
-            assert_eq!(Step::parser(44100.0).parse(text), Ok(expected));
+            assert_eq!(Step::parser().parse(text), Ok(expected));
         }
     }
 }

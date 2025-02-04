@@ -2,19 +2,18 @@ use std::ops::Range;
 
 use chumsky::{
     error::Simple,
-    prelude::{choice, just, one_of},
+    prelude::{just, one_of},
     text, Parser,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Unit {
     Pct,
-    Ms,
 }
 
 impl Unit {
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        choice((just("%").to(Unit::Pct), just("ms").to(Unit::Ms)))
+        just("%").to(Unit::Pct)
     }
 }
 
@@ -30,7 +29,7 @@ pub struct Literal {
 }
 
 impl Literal {
-    fn float_parser(sample_rate: f32) -> impl Parser<char, f32, Error = Simple<char>> {
+    fn float_parser() -> impl Parser<char, f32, Error = Simple<char>> {
         let digits = text::digits(10);
 
         let frac = just('.')
@@ -75,13 +74,12 @@ impl Literal {
         num.then(Unit::parser().or_not())
             .map(move |(v, unit)| match unit {
                 Some(Unit::Pct) => v / 100.0,
-                Some(Unit::Ms) => v * sample_rate / 1000.0,
                 None => v,
             })
     }
 
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
-        Self::float_parser(sample_rate).map_with_span(|float, span| Literal {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+        Self::float_parser().map_with_span(|float, span| Literal {
             value: LiteralValue::Float(float),
             span,
         })
@@ -101,12 +99,11 @@ mod tests {
             ("2.0", 2.0, 0..3),
             ("20e-1", 2.0, 0..5),
             ("200%", 2.0, 0..4),
-            ("10ms", 441.0, 0..4),
         ];
 
         for (text, expected_v, expected_span) in cases {
             assert_eq!(
-                Literal::parser(44100.0).parse(text),
+                Literal::parser().parse(text),
                 Ok(Literal {
                     value: LiteralValue::Float(expected_v),
                     span: expected_span

@@ -15,7 +15,7 @@ fn main() {
     println!("{src}");
 
     let now = Instant::now();
-    let (program, errs) = Program::parser(44100.0).parse_recovery(src.clone());
+    let (program, errs) = Program::parser().parse_recovery(src.clone());
     report_parse_errors(&errs, &src);
     if errs.len() > 0 {
         return;

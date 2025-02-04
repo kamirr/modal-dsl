@@ -118,7 +118,7 @@ mod tests {
         ];
 
         for (text, expected) in cases {
-            assert_eq!(Expr::parser(44100.0).parse(text), Ok(Expr::Block(expected)));
+            assert_eq!(Expr::parser().parse(text), Ok(Expr::Block(expected)));
         }
     }
 }

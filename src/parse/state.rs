@@ -22,10 +22,10 @@ impl StateEntry {
         StateEntry { name, init, span }
     }
 
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         Ident::parser()
             .then_ignore(just("=").padded())
-            .then(Expr::parser(sample_rate))
+            .then(Expr::parser())
             .map_with_span(|(name, init), span| StateEntry { name, init, span })
     }
 }
@@ -37,14 +37,14 @@ pub struct State {
 }
 
 impl State {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         just("state")
             .ignored()
             .then_ignore(whitespace())
             .then_ignore(just("{"))
             .then_ignore(whitespace())
             .then(
-                StateEntry::parser(sample_rate)
+                StateEntry::parser()
                     .then_ignore(whitespace())
                     .then(just(","))
                     .then_ignore(whitespace())
@@ -52,7 +52,7 @@ impl State {
                     .repeated(),
             )
             .map(|((), entries)| entries)
-            .then(StateEntry::parser(sample_rate).or_not())
+            .then(StateEntry::parser().or_not())
             .then_ignore(whitespace())
             .then_ignore(just("}"))
             .map_with_span(|(mut entries, last_entry), span| {
@@ -82,7 +82,7 @@ mod tests {
 
         for (text, (name, span, init)) in cases {
             assert_eq!(
-                StateEntry::parser(44100.0).parse(text),
+                StateEntry::parser().parse(text),
                 Ok(StateEntry {
                     name: Ident::new(name, span),
                     init,
@@ -154,7 +154,7 @@ mod tests {
         ];
 
         for (text, expected) in cases {
-            assert_eq!(State::parser(44100.0).parse(text), Ok(expected));
+            assert_eq!(State::parser().parse(text), Ok(expected));
         }
     }
 }

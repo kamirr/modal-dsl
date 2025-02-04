@@ -21,12 +21,7 @@ use storage::{MappedStorage, StorageBuf, StorageEntry, StorageEntryKind};
 use typed::{LoadCache, TypedStackSlot, TypedValue, ValueType};
 use varstack::VarStack;
 
-use crate::parse::{
-    inputs::InputEntry,
-    literal::{Literal, LiteralValue},
-    state::StateEntry,
-    Program,
-};
+use crate::parse::{inputs::InputEntry, state::StateEntry, Program};
 
 struct InitBuild {
     init: fn(),
@@ -194,7 +189,8 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind, Range<usize>)>::new();
+        let mut storage_tvs =
+            Vec::<(String, Option<TypedValue>, StorageEntryKind, Range<usize>)>::new();
         for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None, extern_funs.clone());
@@ -202,33 +198,17 @@ impl Compiler {
             let init_v = recursor.recurse(init)?;
             storage_tvs.push((
                 name.name.clone(),
-                init_v,
+                Some(init_v),
                 StorageEntryKind::Internal,
                 init.span(),
             ));
         }
-        for InputEntry { name, default, .. } in &program.inputs().entries {
-            let mut stack = VarStack::new();
-            let mut recursor = Recursor::new(&mut builder, &mut stack, None, extern_funs.clone());
-
-            let default = default
-                .clone()
-                .unwrap_or(Literal {
-                    value: LiteralValue::Float(0.0),
-                    span: 0..0,
-                })
-                .into();
-
-            let init_v = recursor.recurse(&default)?;
-            storage_tvs.push((
-                name.name.clone(),
-                init_v,
-                StorageEntryKind::External,
-                default.span(),
-            ));
+        for InputEntry { name, .. } in &program.inputs().entries {
+            storage_tvs.push((name.name.clone(), None, StorageEntryKind::External, 0..0));
         }
         let mapped_storage = Self::build_state_storage(&storage_tvs)?;
 
+        let zero = TypedValue::float(&mut builder, 0.0);
         for (name, ptr_v) in mapped_storage.typed_values() {
             let init_v = storage_tvs
                 .iter()
@@ -236,7 +216,7 @@ impl Compiler {
                 .unwrap();
 
             LoadCache::default()
-                .store(&mut builder, ptr_v, init_v)
+                .store(&mut builder, ptr_v, init_v.unwrap_or(zero))
                 .unwrap();
         }
 
@@ -338,19 +318,23 @@ impl Compiler {
     }
 
     fn build_state_storage(
-        entries: &[(String, TypedValue, StorageEntryKind, Range<usize>)],
+        entries: &[(String, Option<TypedValue>, StorageEntryKind, Range<usize>)],
     ) -> Result<MappedStorage, CompileError> {
         let mut offset = 0usize;
         let mut state_mapping = HashMap::new();
         let mut offsets = HashMap::new();
 
         for (name, tv, _kind, span) in entries {
-            let abi_type = tv.value_type().cl_type().ok_or_else(|| {
-                CompileError::new(
-                    format!("{tv:?} doesn't have a corresponding CL type"),
-                    span.clone(),
-                )
-            })?;
+            let abi_type = tv
+                .map(TypedValue::value_type)
+                .unwrap_or(ValueType::Float)
+                .cl_type()
+                .ok_or_else(|| {
+                    CompileError::new(
+                        format!("{tv:?} doesn't have a corresponding CL type"),
+                        span.clone(),
+                    )
+                })?;
 
             // Assumption that align is the same as size is overly restrictive
             let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
@@ -371,7 +355,7 @@ impl Compiler {
             let offset = offsets.get(name).unwrap();
             state_mapping.insert(name.clone(), unsafe {
                 StorageEntry {
-                    abi: tv.value_type(),
+                    abi: tv.map(TypedValue::value_type).unwrap_or(ValueType::Float),
                     kind: *kind,
                     ptr: storage.get(*offset).as_ptr() as *mut u8,
                 }

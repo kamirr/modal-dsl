@@ -28,8 +28,8 @@ pub mod kwords {
 pub struct Program(pub Vec<Item>);
 
 impl Program {
-    pub fn parser(sample_rate: f32) -> impl Parser<char, Self, Error = Simple<char>> {
-        Item::parser(sample_rate)
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+        Item::parser()
             .padded()
             .repeated()
             .at_least(3)

@@ -9,7 +9,7 @@ state {
 }
 
 inputs {
-    in: sig,
+    in = sig(),
 }
 
 step {
