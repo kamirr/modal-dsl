@@ -35,7 +35,8 @@ fn main() {
         }
     };
     let compile_ms = now.elapsed().as_secs_f32() * 1000.0;
-    log::debug!("State mapping: {:#?}", compiled);
+    log::debug!("State mapping: {:#?}", compiled.storage);
+    log::debug!("Inputs: {:#?}", compiled.inputs());
 
     let mut ready = compiled.init();
     log::info!("result: {}", ready.step());
@@ -49,9 +50,9 @@ fn main() {
     log::info!("parsing took {parse_ms:.2}ms");
     log::info!("compilation took {compile_ms:.2}ms");
     log::info!(
-        "perf coefficient: {}, 1s of eval took {:.2}ms",
+        "perf coefficient: {:.2}, 1s of eval took {:.2}ms",
         1.0 / sim_1s_ms,
-        sim_1s_ms
+        sim_1s_ms * 1000.0
     );
 }
 

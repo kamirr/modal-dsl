@@ -53,8 +53,16 @@ impl<E: Error> From<E> for CompileError {
 }
 
 #[derive(Debug)]
+pub struct InputDesc {
+    pub name: String,
+    pub ty: String,
+    pub args: Vec<String>,
+}
+
+#[derive(Debug)]
 pub struct CompiledProgram {
     pub storage: Arc<MappedStorage>,
+    inputs: Vec<InputDesc>,
     init: fn(),
     step: fn() -> f32,
 }
@@ -64,20 +72,30 @@ impl CompiledProgram {
         (self.init)();
         ReadyProgram {
             storage: self.storage,
+            inputs: self.inputs,
             step: self.step,
         }
+    }
+
+    pub fn inputs(&self) -> &[InputDesc] {
+        &self.inputs
     }
 }
 
 #[derive(Debug)]
 pub struct ReadyProgram {
     pub storage: Arc<MappedStorage>,
+    inputs: Vec<InputDesc>,
     step: fn() -> f32,
 }
 
 impl ReadyProgram {
     pub fn step(&mut self) -> f32 {
         (self.step)()
+    }
+
+    pub fn inputs(&self) -> &[InputDesc] {
+        &self.inputs
     }
 
     pub fn set_f32(&mut self, name: &str, value: f32) {
@@ -160,8 +178,20 @@ impl Compiler {
         let storage = Arc::new(storage);
         let step = self.build_step(program, Arc::clone(&storage))?;
 
+        let inputs = program
+            .inputs()
+            .entries
+            .iter()
+            .map(|InputEntry { name, ty, args, .. }| InputDesc {
+                name: name.name.clone(),
+                ty: ty.name.clone(),
+                args: args.clone(),
+            })
+            .collect();
+
         Ok(CompiledProgram {
             storage,
+            inputs,
             init,
             step,
         })
