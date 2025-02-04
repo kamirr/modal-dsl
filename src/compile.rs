@@ -156,7 +156,7 @@ impl Compiler {
                     ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef,
                 ) => sig.returns.push(AbiParam::new(I64)),
                 Some(ValueType::Float) => sig.returns.push(AbiParam::new(F32)),
-                Some(ValueType::Unit) => panic!(""),
+                Some(ValueType::Bool | ValueType::Unit) => panic!(),
                 None => {}
             }
             extern_signatures.insert(name.to_string(), sig);
@@ -337,7 +337,9 @@ impl Compiler {
             recursor.recurse(expr)?;
         }
 
-        let read_ret = TypedValue::stack_load(&mut builder, retss).value().unwrap();
+        let read_ret = TypedValue::stack_load(&mut builder, retss)
+            .value(&mut builder)
+            .unwrap();
         builder.ins().return_(&[read_ret]);
 
         log::debug!("step IR:\n{}", builder.func.display());

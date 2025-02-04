@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cranelift::prelude::FunctionBuilder;
+use cranelift::prelude::{FunctionBuilder, InstBuilder};
 use cranelift_codegen::ir::FuncRef;
 
 use crate::parse::{
@@ -15,7 +15,7 @@ use crate::parse::{
 
 use super::{
     library::ExternFunc,
-    typed::{LoadCache, TypedStackSlot, TypedValue},
+    typed::{LoadCache, Ptr, TypedStackSlot, TypedValue, TypedValueImpl, ValueType},
     varstack::VarStack,
     CompileError,
 };
@@ -82,7 +82,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let mut r = self.recurse(right)?;
 
                 match op {
-                    Add | Sub | Mul | Div => {
+                    Add | Sub | Mul | Div | Lt => {
                         l = self.load_cache.autoderef(self.builder, l);
                         r = self.load_cache.autoderef(self.builder, r);
                     }
@@ -96,6 +96,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     Sub => l.sub(self.builder, r),
                     Mul => l.mul(self.builder, r),
                     Div => l.div(self.builder, r),
+                    Lt => l.lt(self.builder, r),
                     Assign => self.load_cache.store(self.builder, l, r),
                 }
                 .map_err(|e| CompileError::new(e.msg(), span.clone()))
@@ -122,6 +123,106 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
                 TypedValue::call(self.builder, *func_ref, func_desc, arg_tvs.as_slice())
                     .map_err(|e| CompileError::new(e.msg(), call.span.clone()))
+            }
+            Expr::If(if_) => {
+                let cond_tv = self.recurse(&if_.cond)?;
+                let cond_v = cond_tv
+                    .value(self.builder)
+                    .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?;
+
+                let then_block = self.builder.create_block();
+                let else_block = self.builder.create_block();
+                let merge_block = self.builder.create_block();
+
+                self.builder
+                    .ins()
+                    .brif(cond_v, then_block, &[], else_block, &[]);
+
+                let og_cache = self.load_cache.clone();
+
+                // then
+                self.builder.switch_to_block(then_block);
+                self.builder.seal_block(then_block);
+                let (cache_then, then_v) = {
+                    self.load_cache = og_cache.clone();
+                    self.load_cache.enter_branch();
+                    let then_v = self.recurse(&if_.then.clone().into())?;
+                    self.load_cache.exit_branch();
+
+                    (self.load_cache.clone(), then_v)
+                };
+                let then_ret_args = if then_v.value_type() == ValueType::Unit {
+                    vec![]
+                } else {
+                    vec![then_v
+                        .value(self.builder)
+                        .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
+                };
+                self.builder.ins().jump(merge_block, &then_ret_args);
+
+                // else
+                self.builder.switch_to_block(else_block);
+                self.builder.seal_block(else_block);
+                let (cache_else, else_v) = {
+                    self.load_cache = og_cache.clone();
+                    self.load_cache.enter_branch();
+                    let else_v = self.recurse(&if_.else_.clone().into())?;
+                    self.load_cache.exit_branch();
+
+                    (self.load_cache.clone(), else_v)
+                };
+                let else_ret_args = if else_v.value_type() == ValueType::Unit {
+                    vec![]
+                } else {
+                    vec![else_v
+                        .value(self.builder)
+                        .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
+                };
+                self.builder.ins().jump(merge_block, &else_ret_args);
+
+                // merge
+                let then_vt = then_v.value_type();
+                let else_vt = else_v.value_type();
+                let ret_vt = if then_vt == else_vt {
+                    then_vt
+                } else {
+                    return Err(CompileError { span: if_.span.clone(), msg: format!("Then branch returns {then_vt:?}, while else branch returns {else_vt:?}") });
+                };
+
+                if ret_vt != ValueType::Unit {
+                    let ret_cl_t = ret_vt.cl_type().ok_or_else(|| {
+                        CompileError::new(
+                            format!("{ret_vt:?} doesn't have a corresponding CLIF type"),
+                            if_.span.clone(),
+                        )
+                    })?;
+                    self.builder.append_block_param(merge_block, ret_cl_t);
+                }
+
+                self.load_cache = LoadCache::intersection(cache_then, cache_else);
+                self.builder.switch_to_block(merge_block);
+                self.builder.seal_block(merge_block);
+
+                match self.builder.block_params(merge_block) {
+                    [] => Ok(TypedValue::UNIT),
+                    [v] => Ok(unsafe {
+                        match ret_vt {
+                            ValueType::Unit => unreachable!(),
+                            ValueType::ExternPtr(et) => TypedValue::from_inner(
+                                TypedValueImpl::ExternPtr(Ptr::Value(*v), et),
+                            ),
+                            ValueType::ExternPtrRef(et) => TypedValue::from_inner(
+                                TypedValueImpl::ExternPtrRef(Ptr::Value(*v), et),
+                            ),
+                            ValueType::Float => TypedValue::from_inner(TypedValueImpl::Float(*v)),
+                            ValueType::FloatRef => {
+                                TypedValue::from_inner(TypedValueImpl::FloatRef(Ptr::Value(*v)))
+                            }
+                            ValueType::Bool => TypedValue::from_inner(TypedValueImpl::Bool(*v)),
+                        }
+                    }),
+                    _ => unreachable!(),
+                }
             }
         }
     }

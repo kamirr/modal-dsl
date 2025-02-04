@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use cranelift::prelude::{
-    types::{F32, I64},
-    FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type, Value,
+    types::{F32, I64, I8},
+    FloatCC, FunctionBuilder, InstBuilder, MemFlags, StackSlotData, StackSlotKind, Type, Value,
 };
 use cranelift_codegen::ir::{FuncRef, StackSlot};
 
@@ -85,16 +85,55 @@ impl TypedOpError {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct LoadCache {
-    entries: HashMap<TypedValue, TypedValue>,
+    layers: Vec<HashMap<TypedValue, TypedValue>>,
+}
+
+impl Default for LoadCache {
+    fn default() -> Self {
+        LoadCache {
+            layers: vec![HashMap::default()],
+        }
+    }
 }
 
 impl LoadCache {
+    pub fn intersection(a: LoadCache, b: LoadCache) -> LoadCache {
+        let layers_cnt = a.layers.len().max(b.layers.len());
+        let mut layers = vec![];
+        for k in 0..layers_cnt {
+            let left = a.layers.get(k).cloned().unwrap_or_default();
+            let right = b.layers.get(k).cloned().unwrap_or_default();
+
+            let mut entries = HashMap::new();
+            for (k, v) in left {
+                if right.contains_key(&k) {
+                    entries.insert(k, v);
+                }
+            }
+
+            layers.push(entries);
+        }
+
+        LoadCache { layers }
+    }
+
+    pub fn enter_branch(&mut self) {
+        log::debug!("enter branch");
+        self.layers.push(HashMap::default());
+    }
+    pub fn exit_branch(&mut self) {
+        log::debug!("exit branch");
+        self.layers.pop().unwrap();
+    }
+
     pub fn autoderef(&mut self, builder: &mut FunctionBuilder<'_>, tv: TypedValue) -> TypedValue {
-        if let Some(&cached) = self.entries.get(&tv) {
-            log::debug!("re-used load: *{tv:?} = {cached:?}");
-            return cached;
+        for layer in self.layers.iter().rev() {
+            if let Some(&cached) = layer.get(&tv) {
+                log::debug!("re-used load: *{tv:?} = {cached:?}");
+                return cached;
+            }
         }
 
         let TypedValue(tvi) = tv;
@@ -114,7 +153,7 @@ impl LoadCache {
         });
 
         log::debug!("cached load: *{tv:?} = {result:?}");
-        self.entries.insert(tv, result);
+        self.layers.last_mut().unwrap().insert(tv, result);
         result
     }
 
@@ -152,10 +191,14 @@ impl LoadCache {
 
         if clear_all {
             log::debug!("clear load cache: all");
-            self.entries.clear();
+            for layer in &mut self.layers {
+                layer.clear();
+            }
         } else {
             log::debug!("clear load cache: {dst:?}");
-            self.entries.remove(&dst);
+            for layer in &mut self.layers {
+                layer.remove(&dst);
+            }
         }
 
         Ok(src)
@@ -184,6 +227,7 @@ pub enum ValueType {
     ExternPtrRef(ExternType),
     Float,
     FloatRef,
+    Bool,
 }
 
 impl ValueType {
@@ -191,6 +235,7 @@ impl ValueType {
         match self {
             ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef => Some(I64),
             ValueType::Float => Some(F32),
+            ValueType::Bool => Some(I8),
             _ => None,
         }
     }
@@ -203,6 +248,7 @@ pub(crate) enum TypedValueImpl {
     ExternPtrRef(Ptr, ExternType),
     Float(Value),
     FloatRef(Ptr),
+    Bool(Value),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -340,6 +386,27 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
+    pub fn lt(
+        self,
+        builder: &mut FunctionBuilder<'_>,
+        other: Self,
+    ) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(l) = self;
+        let TypedValue(r) = other;
+
+        let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
+            return Err(TypedOpError::InvalidOp {
+                lhs: self,
+                rhs: other,
+                op: "<",
+            });
+        };
+
+        let v = builder.ins().fcmp(FloatCC::LessThan, l, r);
+
+        Ok(TypedValue(TypedValueImpl::Bool(v)))
+    }
+
     pub fn call(
         builder: &mut FunctionBuilder<'_>,
         func: FuncRef,
@@ -392,6 +459,7 @@ impl TypedValue {
                     }
                     ValueType::FloatRef => TypedValueImpl::FloatRef(Ptr::Value(value)),
                     ValueType::Float => TypedValueImpl::Float(value),
+                    ValueType::Bool => TypedValueImpl::Bool(value),
                 }))
             }
         }
@@ -405,16 +473,23 @@ impl TypedValue {
             TypedValueImpl::ExternPtrRef(_, et) => ValueType::ExternPtrRef(et),
             TypedValueImpl::Float(_) => ValueType::Float,
             TypedValueImpl::FloatRef(_) => ValueType::FloatRef,
+            TypedValueImpl::Bool(_) => ValueType::Bool,
         }
     }
 
-    pub fn value(self) -> Result<Value, TypedOpError> {
+    pub fn value(self, builder: &mut FunctionBuilder<'_>) -> Result<Value, TypedOpError> {
         let TypedValue(tvi) = self;
         match tvi {
-            TypedValueImpl::Float(v) => Ok(v),
             TypedValueImpl::ExternPtr(Ptr::Value(v), _)
             | TypedValueImpl::ExternPtrRef(Ptr::Value(v), _)
-            | TypedValueImpl::FloatRef(Ptr::Value(v)) => Ok(v),
+            | TypedValueImpl::Float(v)
+            | TypedValueImpl::FloatRef(Ptr::Value(v))
+            | TypedValueImpl::Bool(v) => Ok(v),
+            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _)
+            | TypedValueImpl::ExternPtrRef(Ptr::Literal(ptr), _)
+            | TypedValueImpl::FloatRef(Ptr::Literal(ptr)) => {
+                Ok(builder.ins().iconst(I64, ptr as i64))
+            }
             _ => Err(TypedOpError::ClValue { this: self }),
         }
     }

@@ -10,6 +10,7 @@ pub enum BinopKind {
     Sub,
     Mul,
     Div,
+    Lt,
     Assign,
 }
 
@@ -24,6 +25,7 @@ impl BinopKind {
             BinopKind::Sub => "-",
             BinopKind::Mul => "*",
             BinopKind::Div => "/",
+            BinopKind::Lt => "<",
             BinopKind::Assign => "=",
         }
     }

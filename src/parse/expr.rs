@@ -13,6 +13,7 @@ use super::{
     binop::{Binop, BinopKind},
     block::Block,
     call::Call,
+    if_::If,
     let_::Let,
     literal::Literal,
     path::Ident,
@@ -23,6 +24,7 @@ use super::{
 pub enum Expr {
     Block(Block),
     Call(Call),
+    If(If),
     Var(Ident),
     Let(Let),
     Yield(Yield),
@@ -37,6 +39,7 @@ impl Expr {
                 .map(Expr::Literal)
                 .or(Block::parser(expr.clone()).map(Expr::Block))
                 .or(Call::parser(expr.clone()).map(Expr::Call))
+                .or(If::parser(expr.clone()).map(Expr::If))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))
                 .or(Ident::parser().map(Expr::Var))
@@ -70,12 +73,27 @@ impl Expr {
                 })
                 .boxed();
 
-            let assign = sum
+            let cmp = sum
+                .clone()
+                .then(
+                    BinopKind::Lt
+                        .parser()
+                        .then(sum.clone())
+                        .map(|(_op, rhs)| rhs)
+                        .repeated(),
+                )
+                .map(|(lhs, seq)| {
+                    seq.into_iter()
+                        .fold(lhs, |lhs, rhs| BinopKind::Lt.apply(lhs, rhs).into())
+                })
+                .boxed();
+
+            let assign = cmp
                 .clone()
                 .then(
                     BinopKind::Assign
                         .parser()
-                        .then(sum.clone())
+                        .then(cmp.clone())
                         .map(|(_op, rhs)| rhs)
                         .repeated(),
                 )
@@ -93,7 +111,8 @@ impl Expr {
     pub fn span(&self) -> Range<usize> {
         match self {
             Expr::Block(block) => block.span.clone(),
-            Expr::Call(_call) => 0..0,
+            Expr::Call(call) => call.span.clone(),
+            Expr::If(if_) => if_.span.clone(),
             Expr::Var(var) => var.span.clone(),
             Expr::Let(let_) => let_.span.clone(),
             Expr::Yield(yield_) => yield_.span.clone(),

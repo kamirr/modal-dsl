@@ -8,6 +8,7 @@ pub mod binop;
 pub mod block;
 pub mod call;
 pub mod expr;
+pub mod if_;
 pub mod inputs;
 pub mod item;
 pub mod let_;
@@ -18,10 +19,12 @@ pub mod step;
 pub mod yield_;
 
 pub mod kwords {
+    pub const IF: &str = "if";
+    pub const ELSE: &str = "else";
     pub const LET: &str = "let";
     pub const YIELD: &str = "yield";
 
-    pub const ALL: &[&str] = [LET, YIELD].as_slice();
+    pub const ALL: &[&str] = [IF, ELSE, LET, YIELD].as_slice();
 }
 
 #[derive(Clone, Debug, PartialEq)]

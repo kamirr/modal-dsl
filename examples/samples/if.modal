@@ -1,0 +1,15 @@
+state { }
+
+inputs {
+    a = sig(),
+    b = sig(),
+    sel = sig(),
+}
+
+step {
+    yield if sel < 0 {
+        a
+    } else {
+        b
+    };
+}
