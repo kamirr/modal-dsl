@@ -11,6 +11,10 @@ pub enum BinopKind {
     Mul,
     Div,
     Lt,
+    Lte,
+    Eq,
+    Gte,
+    Gt,
     Assign,
 }
 
@@ -26,6 +30,10 @@ impl BinopKind {
             BinopKind::Mul => "*",
             BinopKind::Div => "/",
             BinopKind::Lt => "<",
+            BinopKind::Lte => "<=",
+            BinopKind::Eq => "==",
+            BinopKind::Gte => ">=",
+            BinopKind::Gt => ">",
             BinopKind::Assign => "=",
         }
     }

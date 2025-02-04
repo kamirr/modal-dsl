@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use cranelift::prelude::{FunctionBuilder, InstBuilder};
+use cranelift::prelude::{FloatCC, FunctionBuilder, InstBuilder};
 use cranelift_codegen::ir::FuncRef;
 
 use crate::parse::{
@@ -82,7 +82,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let mut r = self.recurse(right)?;
 
                 match op {
-                    Add | Sub | Mul | Div | Lt => {
+                    Add | Sub | Mul | Div | Lt | Lte | Eq | Gte | Gt => {
                         l = self.load_cache.autoderef(self.builder, l);
                         r = self.load_cache.autoderef(self.builder, r);
                     }
@@ -96,7 +96,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     Sub => l.sub(self.builder, r),
                     Mul => l.mul(self.builder, r),
                     Div => l.div(self.builder, r),
-                    Lt => l.lt(self.builder, r),
+                    Lt => l.fcmp(self.builder, r, FloatCC::LessThan),
+                    Lte => l.fcmp(self.builder, r, FloatCC::LessThanOrEqual),
+                    Eq => l.fcmp(self.builder, r, FloatCC::Equal),
+                    Gte => l.fcmp(self.builder, r, FloatCC::GreaterThanOrEqual),
+                    Gt => l.fcmp(self.builder, r, FloatCC::GreaterThan),
                     Assign => self.load_cache.store(self.builder, l, r),
                 }
                 .map_err(|e| CompileError::new(e.msg(), span.clone()))

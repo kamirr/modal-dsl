@@ -386,10 +386,11 @@ impl TypedValue {
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
-    pub fn lt(
+    pub fn fcmp(
         self,
         builder: &mut FunctionBuilder<'_>,
         other: Self,
+        cmp: FloatCC,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
@@ -402,7 +403,7 @@ impl TypedValue {
             });
         };
 
-        let v = builder.ins().fcmp(FloatCC::LessThan, l, r);
+        let v = builder.ins().fcmp(cmp, l, r);
 
         Ok(TypedValue(TypedValueImpl::Bool(v)))
     }

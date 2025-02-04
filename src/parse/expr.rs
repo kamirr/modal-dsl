@@ -76,15 +76,19 @@ impl Expr {
             let cmp = sum
                 .clone()
                 .then(
-                    BinopKind::Lt
-                        .parser()
-                        .then(sum.clone())
-                        .map(|(_op, rhs)| rhs)
-                        .repeated(),
+                    choice((
+                        BinopKind::Lt.parser(),
+                        BinopKind::Lte.parser(),
+                        BinopKind::Eq.parser(),
+                        BinopKind::Gte.parser(),
+                        BinopKind::Gt.parser(),
+                    ))
+                    .then(sum.clone())
+                    .repeated(),
                 )
                 .map(|(lhs, seq)| {
                     seq.into_iter()
-                        .fold(lhs, |lhs, rhs| BinopKind::Lt.apply(lhs, rhs).into())
+                        .fold(lhs, |lhs, (op, rhs)| op.apply(lhs, rhs).into())
                 })
                 .boxed();
 
