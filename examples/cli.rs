@@ -1,3 +1,4 @@
+use std::hint;
 use std::time::Instant;
 
 use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
@@ -43,7 +44,7 @@ fn main() {
 
     let now = Instant::now();
     for _ in 0..44100 {
-        ready.step();
+        hint::black_box(ready.step());
     }
     let sim_1s_ms = now.elapsed().as_secs_f32();
 

@@ -1,6 +1,11 @@
 use std::ops::Range;
 
-use chumsky::{error::Simple, prelude::Recursive, text::keyword, Parser};
+use chumsky::{
+    error::Simple,
+    prelude::Recursive,
+    text::{keyword, whitespace},
+    Parser,
+};
 
 use super::{block::Block, expr::Expr, kwords};
 
@@ -27,6 +32,7 @@ impl If {
         expr: Recursive<'_, char, Expr, Simple<char>>,
     ) -> impl Parser<char, Self, Error = Simple<char>> + '_ {
         keyword(kwords::IF)
+            .then_ignore(whitespace().at_least(1))
             .then(expr.clone())
             .then(Block::parser(expr.clone()))
             .then_ignore(keyword(kwords::ELSE))

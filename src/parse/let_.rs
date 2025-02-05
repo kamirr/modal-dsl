@@ -3,11 +3,11 @@ use std::ops::Range;
 use chumsky::{
     error::Simple,
     prelude::{just, Recursive},
-    text::TextParser,
+    text::{whitespace, TextParser},
     Parser,
 };
 
-use super::{expr::Expr, kwords::LET, path::Ident};
+use super::{expr::Expr, kwords, path::Ident};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Let {
@@ -20,9 +20,9 @@ impl Let {
     pub fn parser(
         expr: Recursive<'_, char, Expr, Simple<char>>,
     ) -> impl Parser<char, Self, Error = Simple<char>> + '_ {
-        just(LET)
-            .padded()
+        just(kwords::LET)
             .ignored()
+            .then_ignore(whitespace().at_least(1))
             .then(Ident::parser())
             .then_ignore(just("=").padded())
             .then(expr)

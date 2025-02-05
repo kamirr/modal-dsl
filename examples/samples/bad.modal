@@ -1,18 +1,20 @@
 state {
-    buffer3 = {
-        let b = buffer_new();
-        buffer_push(b, 0.0);
-        buffer_push(b, 0.0);
-        buffer_push(b, 0.0);
-        b
-    }
+    a = 0.0,
+    b = 0.0,
 }
 
 inputs {
-    in = time(24ms,),
+    v = sig(),
+    sel = sig(),
 }
 
 step {
-    yield buffer_pop(buffer3);
-    buffer_push(buffer3, in);
+    let ptr = if sel < 0 {
+        a
+    } else {
+        b
+    };
+
+    ptr = v;
+    yield a + b;
 }
