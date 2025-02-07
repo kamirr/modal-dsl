@@ -221,9 +221,13 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             .value(self.builder)
             .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?;
 
-        let then_block = self.builder.create_block();
-        let else_block = self.builder.create_block();
         let merge_block = self.builder.create_block();
+        let then_block = self.builder.create_block();
+        let else_block = if_
+            .else_
+            .is_some()
+            .then(|| self.builder.create_block())
+            .unwrap_or(merge_block);
 
         self.builder
             .ins()
@@ -258,29 +262,35 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         };
 
         // else
-        self.builder.switch_to_block(else_block);
-        self.builder.seal_block(else_block);
-        let else_rec_flw = 'else_blk: {
-            let (cache_else, else_v) = {
-                self.load_cache = og_cache.clone();
-                self.load_cache.enter_branch();
-                let RecurseFlow::Tv(else_v) = self.recurse_block(&if_.else_)? else {
-                    break 'else_blk RecurseFlow::BlockDone;
+        let else_rec_flw = if let Some(else_) = &if_.else_ {
+            self.builder.switch_to_block(else_block);
+            self.builder.seal_block(else_block);
+            let else_rec_flw = 'else_blk: {
+                let (cache_else, else_v) = {
+                    self.load_cache = og_cache.clone();
+                    self.load_cache.enter_branch();
+                    let RecurseFlow::Tv(else_v) = self.recurse_block(else_)? else {
+                        break 'else_blk RecurseFlow::BlockDone;
+                    };
+                    self.load_cache.exit_branch();
+
+                    (self.load_cache.clone(), else_v)
                 };
-                self.load_cache.exit_branch();
+                let else_ret_args = if else_v.value_type() == ValueType::Unit {
+                    vec![]
+                } else {
+                    vec![else_v
+                        .value(self.builder)
+                        .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
+                };
+                self.builder.ins().jump(merge_block, &else_ret_args);
 
-                (self.load_cache.clone(), else_v)
+                RecurseFlow::Tv((else_v.value_type(), cache_else))
             };
-            let else_ret_args = if else_v.value_type() == ValueType::Unit {
-                vec![]
-            } else {
-                vec![else_v
-                    .value(self.builder)
-                    .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
-            };
-            self.builder.ins().jump(merge_block, &else_ret_args);
 
-            RecurseFlow::Tv((else_v.value_type(), cache_else))
+            else_rec_flw
+        } else {
+            RecurseFlow::Tv((ValueType::Unit, og_cache.clone()))
         };
 
         // merge

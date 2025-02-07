@@ -10,10 +10,10 @@ inputs {
 step {
     yield loop {
         if x >= arg {
-            break cnt;
-        } else {
-            cnt = cnt + 1;
-            x = x * 2;
+            break cnt
         };
+
+        cnt = cnt + 1;
+        x = x * 2;
     };
 }
