@@ -5,7 +5,7 @@ use ariadne::{Color, Fmt, Label, Report, ReportKind, Source};
 use chumsky::error::Simple;
 use chumsky::Parser;
 use modal_dsl::compile::library::stdlib;
-use modal_dsl::compile::{CompileError, Compiler};
+use modal_dsl::compile::{CompileError, Compiler, ReadyProgram};
 use modal_dsl::parse::Program;
 
 fn main() {
@@ -40,11 +40,12 @@ fn main() {
     log::debug!("Inputs: {:#?}", compiled.inputs());
 
     let mut ready = compiled.init();
+
     log::info!("result: {}", ready.step());
 
     let now = Instant::now();
     for _ in 0..44100 {
-        hint::black_box(ready.step());
+        hint::black_box(ReadyProgram::step(std::hint::black_box(&mut ready)));
     }
     let sim_1s_ms = now.elapsed().as_secs_f32();
 

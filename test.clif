@@ -1,0 +1,58 @@
+function u0:0() -> f32 system_v {
+        ss0 = explicit_slot 4, align = 4
+        sig0 = (f32) -> f32 system_v
+        sig1 = (f32) -> f32 system_v
+        sig2 = (i64) -> f32 system_v
+        sig3 = (f32) -> f32 system_v
+        sig4 = () -> i64 system_v
+        sig5 = (f32) -> f32 system_v
+        sig6 = (i64, f32) system_v
+        sig7 = (f32, f32) -> f32 system_v
+        sig8 = (f32) -> f32 system_v
+        fn0 = u0:1 sig0
+        fn1 = u0:2 sig1
+        fn2 = u0:3 sig2
+        fn3 = u0:4 sig3
+        fn4 = u0:5 sig4
+        fn5 = u0:6 sig5
+        fn6 = u0:7 sig6
+        fn7 = u0:8 sig7
+        fn8 = u0:9 sig8
+
+    block0:
+        jump block1
+
+    block1:
+        v0 = iconst.i64 0x5b9b_aac3_0574
+        v1 = load.f32 notrap aligned v0  ; v0 = 0x5b9b_aac3_0574
+        v2 = iconst.i64 0x5b9b_aac3_0578
+        v3 = load.f32 notrap aligned v2  ; v2 = 0x5b9b_aac3_0578
+        v4 = fcmp ge v1, v3
+        brif v4, block3, block4
+
+    block3:
+        v5 = iconst.i64 0x5b9b_aac3_0570
+        jump block2(v5)  ; v5 = 0x5b9b_aac3_0570
+
+    block4:
+        v6 = f32const 0x1.000000p0
+        v7 = iconst.i64 0x5b9b_aac3_0570
+        v8 = load.f32 notrap aligned v7  ; v7 = 0x5b9b_aac3_0570
+        v9 = fadd v8, v6  ; v6 = 0x1.000000p0
+        v10 = iconst.i64 0x5b9b_aac3_0570
+        store notrap aligned v9, v10  ; v10 = 0x5b9b_aac3_0570
+        v11 = f32const 0x1.000000p1
+        v12 = fmul.f32 v1, v11  ; v11 = 0x1.000000p1
+        v13 = iconst.i64 0x5b9b_aac3_0574
+        store notrap aligned v12, v13  ; v13 = 0x5b9b_aac3_0574
+        jump block5
+
+    block5:
+        jump block1
+
+    block2(v14: i64):
+        v15 = load.f32 notrap aligned v14
+        stack_store v15, ss0
+        v16 = stack_load.f32 ss0
+        return v16
+    }

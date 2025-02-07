@@ -16,6 +16,7 @@ use super::{
     if_::If,
     let_::Let,
     literal::Literal,
+    loop_::{Break, Loop},
     path::Ident,
     yield_::Yield,
 };
@@ -25,6 +26,8 @@ pub enum Expr {
     Block(Block),
     Call(Call),
     If(If),
+    Loop(Loop),
+    Break(Break),
     Var(Ident),
     Let(Let),
     Yield(Yield),
@@ -40,6 +43,8 @@ impl Expr {
                 .or(Block::parser(expr.clone()).map(Expr::Block))
                 .or(Call::parser(expr.clone()).map(Expr::Call))
                 .or(If::parser(expr.clone()).map(Expr::If))
+                .or(Loop::parser(expr.clone()).map(Expr::Loop))
+                .or(Break::parser(expr.clone()).map(Expr::Break))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))
                 .or(Ident::parser().map(Expr::Var))
@@ -117,6 +122,8 @@ impl Expr {
             Expr::Block(block) => block.span.clone(),
             Expr::Call(call) => call.span.clone(),
             Expr::If(if_) => if_.span.clone(),
+            Expr::Loop(loop_) => loop_.span.clone(),
+            Expr::Break(break_) => break_.span.clone(),
             Expr::Var(var) => var.span.clone(),
             Expr::Let(let_) => let_.span.clone(),
             Expr::Yield(yield_) => yield_.span.clone(),

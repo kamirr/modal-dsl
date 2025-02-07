@@ -1,0 +1,19 @@
+state {
+    cnt = 0.0,
+    x = 1.0,
+}
+
+inputs {
+    arg = sig(),
+}
+
+step {
+    yield loop {
+        if x >= arg {
+            break cnt;
+        } else {
+            cnt = cnt + 1;
+            x = x * 2;
+        };
+    };
+}

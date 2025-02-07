@@ -13,6 +13,7 @@ pub mod inputs;
 pub mod item;
 pub mod let_;
 pub mod literal;
+pub mod loop_;
 pub mod path;
 pub mod state;
 pub mod step;
@@ -21,10 +22,13 @@ pub mod yield_;
 pub mod kwords {
     pub const IF: &str = "if";
     pub const ELSE: &str = "else";
+    pub const LOOP: &str = "loop";
+    pub const WHILE: &str = "while";
+    pub const BREAK: &str = "break";
     pub const LET: &str = "let";
     pub const YIELD: &str = "yield";
 
-    pub const ALL: &[&str] = [IF, ELSE, LET, YIELD].as_slice();
+    pub const ALL: &[&str] = [IF, ELSE, LOOP, WHILE, BREAK, LET, YIELD].as_slice();
 }
 
 #[derive(Clone, Debug, PartialEq)]
