@@ -17,6 +17,14 @@ pub struct Block {
 }
 
 impl Block {
+    pub fn empty(span: Range<usize>) -> Self {
+        Block {
+            exprs: vec![],
+            ret_last: false,
+            span,
+        }
+    }
+
     pub fn parser(
         expr: Recursive<'_, char, Expr, Simple<char>>,
     ) -> impl Parser<char, Self, Error = Simple<char>> + '_ {

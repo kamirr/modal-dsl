@@ -369,6 +369,21 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         self.loop_stack.push((merge_block, Vec::new()));
 
         self.builder.switch_to_block(loop_block);
+
+        // If the loop has a condition, insert it at the top of the body
+        if let Some(cond) = loop_.cond.clone() {
+            let span = cond.span();
+            self.recurse_if(&If {
+                cond,
+                then: Block::empty(span.clone()),
+                else_: Some(Box::new(Expr::Break(Break {
+                    expr: None,
+                    span: span.clone(),
+                }))),
+                span,
+            })?;
+        }
+
         'loop_blk: {
             if let RecurseFlow::BlockDone = self.recurse_block(&loop_.body)? {
                 break 'loop_blk;
