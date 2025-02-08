@@ -275,6 +275,7 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    /// Cranelift [`Type`] corresponding to this type
     pub fn cl_type(&self) -> Type {
         match self {
             ValueType::ExternPtr(_) | ValueType::Ref(_) => I64,
@@ -284,6 +285,7 @@ impl ValueType {
         }
     }
 
+    /// Pretty-print the type
     pub fn pretty(&self) -> String {
         match self {
             ValueType::Unit => String::from("Unit"),
@@ -334,15 +336,6 @@ impl TypedValue {
 
     pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
         TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
-    }
-
-    pub fn as_ptr(self) -> *mut u8 {
-        let TypedValue(tvi) = self;
-        match tvi {
-            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _et) => ptr,
-            TypedValueImpl::Ref(Ptr::Literal(ptr), _vt) => ptr,
-            _ => panic!(),
-        }
     }
 
     pub fn add(
