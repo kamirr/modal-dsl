@@ -269,7 +269,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let (cache_else, else_v) = {
                     self.load_cache = og_cache.clone();
                     self.load_cache.enter_branch();
-                    let RecurseFlow::Tv(else_v) = self.recurse_block(else_)? else {
+                    let RecurseFlow::Tv(else_v) = self.recurse_i(else_)? else {
                         break 'else_blk RecurseFlow::BlockDone;
                     };
                     self.load_cache.exit_branch();
