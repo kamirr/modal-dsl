@@ -236,7 +236,7 @@ impl Compiler {
             storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::Internal));
         }
         for InputEntry { name, .. } in &program.inputs().entries {
-            let zero = TypedValue::float(&mut builder, 0.0);
+            let zero = TypedValue::new_float(&mut builder, 0.0);
             storage_tvs.push((name.name.clone(), zero.clone(), StorageEntryKind::External));
         }
         let mapped_storage = Self::build_state_storage(&storage_tvs)?;

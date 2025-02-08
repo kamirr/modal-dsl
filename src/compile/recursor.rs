@@ -102,11 +102,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         &mut self,
         literal: &Literal,
     ) -> Result<RecurseFlow<TypedValue>, CompileError> {
-        let Literal {
-            value: LiteralValue::Float(f),
-            ..
-        } = literal;
-        Ok(RecurseFlow::Continue(TypedValue::float(self.builder, *f)))
+        let tv = match literal.value {
+            LiteralValue::Float(f) => TypedValue::new_float(self.builder, f),
+            LiteralValue::Bool(b) => TypedValue::new_bool(self.builder, b),
+        };
+        Ok(RecurseFlow::Continue(tv))
     }
 
     fn recurse_let(&mut self, let_: &Let) -> Result<RecurseFlow<TypedValue>, CompileError> {

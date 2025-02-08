@@ -312,6 +312,16 @@ pub struct TypedValue(TypedValueImpl);
 impl TypedValue {
     pub const UNIT: Self = TypedValue(TypedValueImpl::Unit);
 
+    pub fn new_float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
+        TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
+    }
+
+    pub fn new_bool(builder: &mut FunctionBuilder<'_>, b: bool) -> Self {
+        TypedValue(TypedValueImpl::Float(
+            builder.ins().iconst(I8, if b { 1 } else { 0 }),
+        ))
+    }
+
     pub(crate) unsafe fn with_ty_value(ty: ValueType, v: Value) -> Self {
         let tvi = match ty {
             ValueType::Unit => TypedValueImpl::Unit,
@@ -332,10 +342,6 @@ impl TypedValue {
         };
 
         TypedValue(tvi)
-    }
-
-    pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
-        TypedValue(TypedValueImpl::Float(builder.ins().f32const(f)))
     }
 
     pub fn add(

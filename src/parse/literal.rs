@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use chumsky::{
     error::Simple,
-    prelude::{just, one_of},
+    prelude::{choice, just, one_of},
     text, Parser,
 };
 
@@ -20,6 +20,7 @@ impl Unit {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LiteralValue {
     Float(f32),
+    Bool(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,11 +79,16 @@ impl Literal {
             })
     }
 
+    fn bool_parser() -> impl Parser<char, bool, Error = Simple<char>> {
+        choice((just("true").to(true), just("false").to(false)))
+    }
+
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
-        Self::float_parser().map_with_span(|float, span| Literal {
-            value: LiteralValue::Float(float),
-            span,
-        })
+        choice((
+            Self::float_parser().map(LiteralValue::Float),
+            Self::bool_parser().map(LiteralValue::Bool),
+        ))
+        .map_with_span(|value, span| Literal { value, span })
     }
 }
 
@@ -92,7 +98,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     #[test]
-    fn test_literal() {
+    fn test_float() {
         let cases = [
             ("2", 2.0, 0..1),
             ("1e1", 10.0, 0..3),
@@ -106,6 +112,21 @@ mod tests {
                 Literal::parser().parse(text),
                 Ok(Literal {
                     value: LiteralValue::Float(expected_v),
+                    span: expected_span
+                })
+            )
+        }
+    }
+
+    #[test]
+    fn test_bool() {
+        let cases = [("true", true, 0..4), ("false", false, 0..5)];
+
+        for (text, expected_v, expected_span) in cases {
+            assert_eq!(
+                Literal::parser().parse(text),
+                Ok(Literal {
+                    value: LiteralValue::Bool(expected_v),
                     span: expected_span
                 })
             )
