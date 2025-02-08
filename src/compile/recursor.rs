@@ -23,20 +23,32 @@ use super::{
     CompileError,
 };
 
+/// Instruct control flow of the recursor
+///
+/// Some expressions, like `break`, do not yield a value that could be handled
+/// by naive recursion. Moreover, a jump always closes a Cranelift block, so we
+/// can insert no more instructions.
+///
+/// This enum describes that a recursion can either yield a result, or that it
+/// has diverged and thus we must abstain from all normal work and handle this
+/// information. This is a responsibility of `recurse_EXPR` functions that
+/// manipulate Cranelift blocks. All other recursions can simply bubble the
+/// [`RecurseFlow::BlockDone`] result upwards.
 enum RecurseFlow<T> {
-    Tv(T),
+    Continue(T),
     BlockDone,
 }
 
 impl<T> RecurseFlow<T> {
     fn map<U>(self, f: impl FnOnce(T) -> U) -> RecurseFlow<U> {
         match self {
-            RecurseFlow::Tv(t) => RecurseFlow::Tv(f(t)),
+            RecurseFlow::Continue(t) => RecurseFlow::Continue(f(t)),
             RecurseFlow::BlockDone => RecurseFlow::BlockDone,
         }
     }
 }
 
+/// State for recursively compiling the AST
 pub struct Recursor<'fb, 'b, 'vs> {
     builder: &'fb mut FunctionBuilder<'b>,
     stack: &'vs mut VarStack,
@@ -63,9 +75,10 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }
     }
 
+    /// Compile an [`Expr`]
     pub fn recurse(&mut self, expr: &Expr) -> Result<TypedValue, CompileError> {
         match self.recurse_i(expr)? {
-            RecurseFlow::Tv(tv) => Ok(tv),
+            RecurseFlow::Continue(tv) => Ok(tv),
             RecurseFlow::BlockDone => todo!(),
         }
     }
@@ -93,7 +106,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             value: LiteralValue::Float(f),
             ..
         } = literal;
-        Ok(RecurseFlow::Tv(TypedValue::float(self.builder, *f)))
+        Ok(RecurseFlow::Continue(TypedValue::float(self.builder, *f)))
     }
 
     fn recurse_let(&mut self, let_: &Let) -> Result<RecurseFlow<TypedValue>, CompileError> {
@@ -106,9 +119,12 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
     fn recurse_var(&mut self, var: &Ident) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let Ident { name, span } = var;
-        self.stack.get(&name).map(RecurseFlow::Tv).ok_or_else(|| {
-            CompileError::new(format!("Variable {} not in scope", name), span.clone())
-        })
+        self.stack
+            .get(&name)
+            .map(RecurseFlow::Continue)
+            .ok_or_else(|| {
+                CompileError::new(format!("Variable {} not in scope", name), span.clone())
+            })
     }
 
     fn recurse_block(&mut self, block: &Block) -> Result<RecurseFlow<TypedValue>, CompileError> {
@@ -119,7 +135,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         self.stack.push();
         let mut last = TypedValue::UNIT;
         for expr in exprs {
-            let RecurseFlow::Tv(tv) = self.recurse_i(expr)? else {
+            let RecurseFlow::Continue(tv) = self.recurse_i(expr)? else {
                 self.stack.pop();
                 return Ok(RecurseFlow::BlockDone);
             };
@@ -127,7 +143,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }
         self.stack.pop();
 
-        Ok(RecurseFlow::Tv(if *ret_last {
+        Ok(RecurseFlow::Continue(if *ret_last {
             last
         } else {
             TypedValue::UNIT
@@ -144,10 +160,10 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             span,
         } = binop;
 
-        let RecurseFlow::Tv(mut l) = self.recurse_i(left)? else {
+        let RecurseFlow::Continue(mut l) = self.recurse_i(left)? else {
             return Ok(RecurseFlow::BlockDone);
         };
-        let RecurseFlow::Tv(mut r) = self.recurse_i(right)? else {
+        let RecurseFlow::Continue(mut r) = self.recurse_i(right)? else {
             return Ok(RecurseFlow::BlockDone);
         };
 
@@ -173,7 +189,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             Gt => l.fcmp(self.builder, r, FloatCC::GreaterThan),
             Assign => self.load_cache.store(self.builder, l, r),
         }
-        .map(RecurseFlow::Tv)
+        .map(RecurseFlow::Continue)
         .map_err(|e| CompileError::new(e.msg(), span.clone()))
     }
 
@@ -183,7 +199,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             panic!("retss not provided")
         };
 
-        let RecurseFlow::Tv(tv) = self.recurse_i(value)? else {
+        let RecurseFlow::Continue(tv) = self.recurse_i(value)? else {
             return Ok(RecurseFlow::BlockDone);
         };
 
@@ -193,13 +209,13 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             .stack_store(self.builder, retss)
             .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
 
-        Ok(RecurseFlow::Tv(ret_tv))
+        Ok(RecurseFlow::Continue(ret_tv))
     }
 
     fn recurse_call(&mut self, call: &Call) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let mut arg_tvs = Vec::new();
         for arg in &call.args {
-            let RecurseFlow::Tv(arg_tv) = self.recurse_i(arg)? else {
+            let RecurseFlow::Continue(arg_tv) = self.recurse_i(arg)? else {
                 return Ok(RecurseFlow::BlockDone);
             };
             arg_tvs.push(self.load_cache.autoderef(self.builder, arg_tv));
@@ -210,11 +226,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         let tv = TypedValue::call(self.builder, *func_ref, func_desc, arg_tvs.as_slice())
             .map_err(|e| CompileError::new(e.msg(), call.span.clone()))?;
 
-        Ok(RecurseFlow::Tv(tv))
+        Ok(RecurseFlow::Continue(tv))
     }
 
     fn recurse_if(&mut self, if_: &If) -> Result<RecurseFlow<TypedValue>, CompileError> {
-        let RecurseFlow::Tv(cond_tv) = self.recurse_i(&if_.cond)? else {
+        let RecurseFlow::Continue(cond_tv) = self.recurse_i(&if_.cond)? else {
             return Ok(RecurseFlow::BlockDone);
         };
         let cond_v = cond_tv
@@ -242,7 +258,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             let (cache_then, then_v) = {
                 self.load_cache = og_cache.clone();
                 self.load_cache.enter_branch();
-                let RecurseFlow::Tv(then_v) = self.recurse_block(&if_.then)? else {
+                let RecurseFlow::Continue(then_v) = self.recurse_block(&if_.then)? else {
                     break 'then_blk RecurseFlow::BlockDone;
                 };
                 self.load_cache.exit_branch();
@@ -258,7 +274,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             };
             self.builder.ins().jump(merge_block, &then_ret_args);
 
-            RecurseFlow::Tv((then_v.value_type(), cache_then))
+            RecurseFlow::Continue((then_v.value_type(), cache_then))
         };
 
         // else
@@ -269,7 +285,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let (cache_else, else_v) = {
                     self.load_cache = og_cache.clone();
                     self.load_cache.enter_branch();
-                    let RecurseFlow::Tv(else_v) = self.recurse_i(else_)? else {
+                    let RecurseFlow::Continue(else_v) = self.recurse_i(else_)? else {
                         break 'else_blk RecurseFlow::BlockDone;
                     };
                     self.load_cache.exit_branch();
@@ -285,25 +301,25 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 };
                 self.builder.ins().jump(merge_block, &else_ret_args);
 
-                RecurseFlow::Tv((else_v.value_type(), cache_else))
+                RecurseFlow::Continue((else_v.value_type(), cache_else))
             };
 
             else_rec_flw
         } else {
-            RecurseFlow::Tv((ValueType::Unit, og_cache.clone()))
+            RecurseFlow::Continue((ValueType::Unit, og_cache.clone()))
         };
 
         // merge
         let ret_vt = *match (&then_rec_flw, &else_rec_flw) {
-            (RecurseFlow::Tv((then_vt, _)), RecurseFlow::Tv((else_vt, _))) => {
+            (RecurseFlow::Continue((then_vt, _)), RecurseFlow::Continue((else_vt, _))) => {
                 if then_vt == else_vt {
                     then_vt
                 } else {
                     return Err(CompileError { span: if_.span.clone(), msg: format!("Then branch returns {then_vt:?}, while else branch returns {else_vt:?}") });
                 }
             }
-            (RecurseFlow::Tv((then_vt, _)), RecurseFlow::BlockDone) => then_vt,
-            (RecurseFlow::BlockDone, RecurseFlow::Tv((else_vt, _))) => else_vt,
+            (RecurseFlow::Continue((then_vt, _)), RecurseFlow::BlockDone) => then_vt,
+            (RecurseFlow::BlockDone, RecurseFlow::Continue((else_vt, _))) => else_vt,
             (RecurseFlow::BlockDone, RecurseFlow::BlockDone) => {
                 return Ok(RecurseFlow::BlockDone);
             }
@@ -324,11 +340,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             then_rec_flw.map(xtract_cache),
             else_rec_flw.map(xtract_cache),
         ) {
-            (RecurseFlow::Tv(cache_then), RecurseFlow::Tv(cache_else)) => {
+            (RecurseFlow::Continue(cache_then), RecurseFlow::Continue(cache_else)) => {
                 LoadCache::intersection(cache_then, cache_else)
             }
-            (RecurseFlow::Tv(cache_then), RecurseFlow::BlockDone) => cache_then,
-            (RecurseFlow::BlockDone, RecurseFlow::Tv(cache_else)) => cache_else,
+            (RecurseFlow::Continue(cache_then), RecurseFlow::BlockDone) => cache_then,
+            (RecurseFlow::BlockDone, RecurseFlow::Continue(cache_else)) => cache_else,
             (RecurseFlow::BlockDone, RecurseFlow::BlockDone) => unreachable!(),
         };
         self.builder.switch_to_block(merge_block);
@@ -355,7 +371,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             _ => unreachable!(),
         };
 
-        Ok(RecurseFlow::Tv(tv))
+        Ok(RecurseFlow::Continue(tv))
     }
 
     fn recurse_loop(&mut self, loop_: &Loop) -> Result<RecurseFlow<TypedValue>, CompileError> {
@@ -430,12 +446,12 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             _ => unreachable!(),
         };
 
-        Ok(RecurseFlow::Tv(tv))
+        Ok(RecurseFlow::Continue(tv))
     }
 
     fn recurse_break(&mut self, break_: &Break) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let ret_tv = if let Some(expr) = &break_.expr {
-            let RecurseFlow::Tv(tv) = self.recurse_i(&expr)? else {
+            let RecurseFlow::Continue(tv) = self.recurse_i(&expr)? else {
                 return Ok(RecurseFlow::BlockDone);
             };
             tv
