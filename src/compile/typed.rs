@@ -317,7 +317,7 @@ impl TypedValue {
     }
 
     pub fn new_bool(builder: &mut FunctionBuilder<'_>, b: bool) -> Self {
-        TypedValue(TypedValueImpl::Float(
+        TypedValue(TypedValueImpl::Bool(
             builder.ins().iconst(I8, if b { 1 } else { 0 }),
         ))
     }

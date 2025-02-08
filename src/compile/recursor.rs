@@ -235,6 +235,16 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         let RecurseFlow::Continue(cond_tv) = self.recurse_i(&if_.cond)? else {
             return Ok(RecurseFlow::BlockDone);
         };
+
+        let cond_tv = self.load_cache.autoderef(self.builder, cond_tv);
+
+        if cond_tv.value_type() != ValueType::Bool {
+            return Err(CompileError {
+                span: if_.cond.span(),
+                msg: format!("If expected Bool, found {}", cond_tv.value_type().pretty()),
+            });
+        }
+
         let cond_v = cond_tv.value(self.builder);
 
         let merge_block = self.builder.create_block();
