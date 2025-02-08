@@ -50,12 +50,6 @@ pub enum TypedOpError {
         found: ValueType,
         arg_n: usize,
     },
-    ClValue {
-        this: TypedValue,
-    },
-    ClType {
-        this: TypedValue,
-    },
 }
 
 impl TypedOpError {
@@ -67,9 +61,6 @@ impl TypedOpError {
             TypedOpError::InvalidOp { lhs, rhs, op } => {
                 format!("Operation {lhs:?} {op} {rhs:?} undefined")
             }
-            TypedOpError::ClValue { this } => {
-                format!("{this:?} does not have a cranelift value")
-            }
             TypedOpError::InvalidCallArgsN { expected, found } => {
                 format!("Expected {expected} arguments, found {found}")
             }
@@ -80,7 +71,6 @@ impl TypedOpError {
             } => {
                 format!("Argument #{arg_n} expected type {expected:?}, found {found:?}")
             }
-            TypedOpError::ClType { this } => format!("{this:?} does not have a cranelift type"),
         }
     }
 }
@@ -130,30 +120,32 @@ impl LoadCache {
 
     pub fn autoderef(&mut self, builder: &mut FunctionBuilder<'_>, tv: TypedValue) -> TypedValue {
         for layer in self.layers.iter().rev() {
-            if let Some(&cached) = layer.get(&tv) {
+            if let Some(cached) = layer.get(&tv).cloned() {
                 log::debug!("re-used load: *{tv:?} = {cached:?}");
                 return cached;
             }
         }
 
-        let TypedValue(tvi) = tv;
-        let result = TypedValue(match tvi {
-            TypedValueImpl::ExternPtrRef(ptr, et) => {
+        let TypedValue(tvi) = &tv;
+        let result = match tvi {
+            TypedValueImpl::Ref(ptr, vt) => {
+                // loads of Unit are a no-op
+                if vt == &ValueType::Unit {
+                    return TypedValue::UNIT;
+                }
+
                 let ptr = ptr.value(builder);
-                TypedValueImpl::ExternPtr(
-                    Ptr::Value(builder.ins().load(I64, MemFlags::trusted(), ptr, 0)),
-                    et,
-                )
+                let v = builder
+                    .ins()
+                    .load(vt.cl_type(), MemFlags::trusted(), ptr, 0);
+
+                unsafe { TypedValue::with_ty_value(vt.clone(), v) }
             }
-            TypedValueImpl::FloatRef(ptr) => {
-                let ptr = ptr.value(builder);
-                TypedValueImpl::Float(builder.ins().load(F32, MemFlags::trusted(), ptr, 0))
-            }
-            other => return TypedValue(other),
-        });
+            other => return TypedValue(other.clone()),
+        };
 
         log::debug!("cached load: *{tv:?} = {result:?}");
-        self.layers.last_mut().unwrap().insert(tv, result);
+        self.layers.last_mut().unwrap().insert(tv, result.clone());
         result
     }
 
@@ -163,31 +155,34 @@ impl LoadCache {
         dst: TypedValue,
         src: TypedValue,
     ) -> Result<TypedValue, TypedOpError> {
-        let TypedValue(dsti) = dst;
-        let TypedValue(srci) = src;
+        let TypedValue(dsti) = &dst;
 
-        let clear_all;
-        match (dsti, srci) {
-            (TypedValueImpl::FloatRef(dst_ptr), TypedValueImpl::Float(src_v)) => {
-                clear_all = matches!(dst_ptr, Ptr::Value(_));
-                let ptr = dst_ptr.value(builder);
-                builder.ins().store(MemFlags::trusted(), src_v, ptr, 0);
-            }
-            (TypedValueImpl::ExternPtrRef(dst_ptr, et1), TypedValueImpl::ExternPtr(src_v, et2)) => {
-                clear_all = matches!(dst_ptr, Ptr::Value(_));
-                assert_eq!(et1, et2);
-                let ptr = dst_ptr.value(builder);
-                let src_v = src_v.value(builder);
-                builder.ins().store(MemFlags::trusted(), src_v, ptr, 0);
-            }
-            _ => {
-                return Err(TypedOpError::InvalidOp {
-                    lhs: dst,
-                    rhs: src,
-                    op: "=",
-                });
-            }
+        let TypedValueImpl::Ref(dst_ptr, dst_vt) = &dsti else {
+            return Err(TypedOpError::InvalidOp {
+                lhs: dst.clone(),
+                rhs: src.clone(),
+                op: "=",
+            });
+        };
+
+        if dst_vt != &src.value_type() {
+            return Err(TypedOpError::InvalidOp {
+                lhs: dst,
+                rhs: src,
+                op: "=",
+            });
         }
+
+        // Stores to Unit are a no-op
+        if dst_vt == &ValueType::Unit {
+            return Ok(TypedValue::UNIT);
+        }
+
+        let clear_all = matches!(dst_ptr, Ptr::Value(_));
+
+        let ptr_v = dst_ptr.value(builder);
+        let src_v = src.value(builder);
+        builder.ins().store(MemFlags::trusted(), src_v, ptr_v, 0);
 
         if clear_all {
             log::debug!("clear load cache: all");
@@ -220,49 +215,61 @@ impl Ptr {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ValueType {
     Unit,
     ExternPtr(ExternType),
-    ExternPtrRef(ExternType),
     Float,
-    FloatRef,
     Bool,
+    Ref(Box<Self>),
 }
 
 impl ValueType {
-    pub fn cl_type(self) -> Option<Type> {
+    pub fn cl_type(&self) -> Type {
         match self {
-            ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef => Some(I64),
-            ValueType::Float => Some(F32),
-            ValueType::Bool => Some(I8),
-            _ => None,
+            ValueType::ExternPtr(_) | ValueType::Ref(_) => I64,
+            ValueType::Unit => I8,
+            ValueType::Float => F32,
+            ValueType::Bool => I8,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum TypedValueImpl {
     Unit,
     ExternPtr(Ptr, ExternType),
-    ExternPtrRef(Ptr, ExternType),
     Float(Value),
-    FloatRef(Ptr),
     Bool(Value),
+    Ref(Ptr, ValueType),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TypedValue(TypedValueImpl);
 
 impl TypedValue {
     pub const UNIT: Self = TypedValue(TypedValueImpl::Unit);
 
-    /// SAFETY:
-    /// - If the TypedValueImpl contains a pointer, it must be valid in the
-    ///   context of this specific program and point to the appropriate
-    ///   storage entry.
-    pub(crate) unsafe fn from_inner(inner: TypedValueImpl) -> Self {
-        TypedValue(inner)
+    pub(crate) unsafe fn with_ty_value(ty: ValueType, v: Value) -> Self {
+        let tvi = match ty {
+            ValueType::Unit => TypedValueImpl::Unit,
+            ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Value(v), et),
+            ValueType::Float => TypedValueImpl::Float(v),
+            ValueType::Bool => TypedValueImpl::Bool(v),
+            ValueType::Ref(vt) => TypedValueImpl::Ref(Ptr::Value(v), (*vt).clone()),
+        };
+
+        TypedValue(tvi)
+    }
+
+    pub(crate) unsafe fn with_ty_ptr(ty: ValueType, ptr: *mut u8) -> Self {
+        let tvi = match ty.clone() {
+            ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Literal(ptr), et),
+            ValueType::Ref(inner_vt) => TypedValueImpl::Ref(Ptr::Literal(ptr), *inner_vt),
+            _ => panic!("{ty:?} is not a reference type"),
+        };
+
+        TypedValue(tvi)
     }
 
     pub fn float(builder: &mut FunctionBuilder<'_>, f: f32) -> Self {
@@ -272,8 +279,8 @@ impl TypedValue {
     pub fn as_ptr(self) -> *mut u8 {
         let TypedValue(tvi) = self;
         match tvi {
-            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _) => ptr,
-            TypedValueImpl::FloatRef(Ptr::Literal(ptr)) => ptr,
+            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _et) => ptr,
+            TypedValueImpl::Ref(Ptr::Literal(ptr), _vt) => ptr,
             _ => panic!(),
         }
     }
@@ -288,7 +295,7 @@ impl TypedValue {
     }
 
     pub fn stack_store(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
         tss: TypedStackSlot,
     ) -> Result<Self, TypedOpError> {
@@ -296,100 +303,100 @@ impl TypedValue {
         let TypedStackSlot(tssi) = tss;
         match (tvi, tssi) {
             (TypedValueImpl::Float(value), TypedStackSlotImpl::Float(ss)) => Ok({
-                builder.ins().stack_store(value, ss, 0);
+                builder.ins().stack_store(*value, ss, 0);
                 TypedValue::UNIT
             }),
             _ => Err(TypedOpError::InvalidStore {
                 slot: tss,
-                value: self,
+                value: self.clone(),
             }),
         }
     }
 
     pub fn add(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
-        other: Self,
+        other: &Self,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
+                lhs: self.clone(),
+                rhs: other.clone(),
                 op: "+",
             });
         };
 
-        let v = builder.ins().fadd(l, r);
+        let v = builder.ins().fadd(*l, *r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
     pub fn sub(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
-        other: Self,
+        other: &Self,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
+                lhs: self.clone(),
+                rhs: other.clone(),
                 op: "-",
             });
         };
 
-        let v = builder.ins().fsub(l, r);
+        let v = builder.ins().fsub(*l, *r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
     pub fn mul(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
-        other: Self,
+        other: &Self,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
+                lhs: self.clone(),
+                rhs: other.clone(),
                 op: "*",
             });
         };
 
-        let v = builder.ins().fmul(l, r);
+        let v = builder.ins().fmul(*l, *r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
     pub fn div(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
-        other: Self,
+        other: &Self,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
         let TypedValue(r) = other;
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
+                lhs: self.clone(),
+                rhs: other.clone(),
                 op: "/",
             });
         };
 
-        let v = builder.ins().fdiv(l, r);
+        let v = builder.ins().fdiv(*l, *r);
         Ok(TypedValue(TypedValueImpl::Float(v)))
     }
 
     pub fn fcmp(
-        self,
+        &self,
         builder: &mut FunctionBuilder<'_>,
-        other: Self,
+        other: &Self,
         cmp: FloatCC,
     ) -> Result<TypedValue, TypedOpError> {
         let TypedValue(l) = self;
@@ -397,13 +404,13 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self,
-                rhs: other,
+                lhs: self.clone(),
+                rhs: other.clone(),
                 op: "<",
             });
         };
 
-        let v = builder.ins().fcmp(cmp, l, r);
+        let v = builder.ins().fcmp(cmp, *l, *r);
 
         Ok(TypedValue(TypedValueImpl::Bool(v)))
     }
@@ -424,8 +431,8 @@ impl TypedValue {
         let mut arg_vs = Vec::new();
         for (n, (arg_tv, arg_abi)) in args
             .iter()
-            .copied()
-            .zip(func_desc.args.iter().copied())
+            .cloned()
+            .zip(func_desc.args.iter().cloned())
             .enumerate()
         {
             let TypedValue(tvi) = arg_tv;
@@ -434,7 +441,9 @@ impl TypedValue {
                     assert_eq!(et1, et2);
                     ptr.value(builder)
                 }
-                (TypedValueImpl::FloatRef(ptr), ValueType::FloatRef) => ptr.value(builder),
+                (TypedValueImpl::Ref(ptr, vt), ValueType::Ref(ref_vt)) if vt == *ref_vt => {
+                    ptr.value(builder)
+                }
                 (TypedValueImpl::Float(value), ValueType::Float) => value,
                 (tvi, ty) => {
                     return Err(TypedOpError::InvaldCallArgTy {
@@ -448,50 +457,36 @@ impl TypedValue {
         }
 
         let call = builder.ins().call(func, &arg_vs);
-        match func_desc.ret {
+        match &func_desc.ret {
             None => Ok(TypedValue::UNIT),
             Some(abi) => {
                 let value = builder.inst_results(call)[0];
-                Ok(TypedValue(match abi {
-                    ValueType::Unit => TypedValueImpl::Unit,
-                    ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Value(value), et),
-                    ValueType::ExternPtrRef(et) => {
-                        TypedValueImpl::ExternPtrRef(Ptr::Value(value), et)
-                    }
-                    ValueType::FloatRef => TypedValueImpl::FloatRef(Ptr::Value(value)),
-                    ValueType::Float => TypedValueImpl::Float(value),
-                    ValueType::Bool => TypedValueImpl::Bool(value),
-                }))
+                Ok(unsafe { TypedValue::with_ty_value(abi.clone(), value) })
             }
         }
     }
 
-    pub fn value_type(self) -> ValueType {
+    pub fn value_type(&self) -> ValueType {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::Unit => ValueType::Unit,
-            TypedValueImpl::ExternPtr(_, et) => ValueType::ExternPtr(et),
-            TypedValueImpl::ExternPtrRef(_, et) => ValueType::ExternPtrRef(et),
+            TypedValueImpl::ExternPtr(_, et) => ValueType::ExternPtr(*et),
             TypedValueImpl::Float(_) => ValueType::Float,
-            TypedValueImpl::FloatRef(_) => ValueType::FloatRef,
             TypedValueImpl::Bool(_) => ValueType::Bool,
+            TypedValueImpl::Ref(_, vt) => ValueType::Ref(Box::new(vt.clone())),
         }
     }
 
-    pub fn value(self, builder: &mut FunctionBuilder<'_>) -> Result<Value, TypedOpError> {
+    pub fn value(&self, builder: &mut FunctionBuilder<'_>) -> Value {
         let TypedValue(tvi) = self;
         match tvi {
             TypedValueImpl::ExternPtr(Ptr::Value(v), _)
-            | TypedValueImpl::ExternPtrRef(Ptr::Value(v), _)
             | TypedValueImpl::Float(v)
-            | TypedValueImpl::FloatRef(Ptr::Value(v))
-            | TypedValueImpl::Bool(v) => Ok(v),
+            | TypedValueImpl::Bool(v)
+            | TypedValueImpl::Ref(Ptr::Value(v), _) => *v,
             TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _)
-            | TypedValueImpl::ExternPtrRef(Ptr::Literal(ptr), _)
-            | TypedValueImpl::FloatRef(Ptr::Literal(ptr)) => {
-                Ok(builder.ins().iconst(I64, ptr as i64))
-            }
-            _ => Err(TypedOpError::ClValue { this: self }),
+            | TypedValueImpl::Ref(Ptr::Literal(ptr), _) => builder.ins().iconst(I64, *ptr as i64),
+            TypedValueImpl::Unit => builder.ins().iconst(I8, 0),
         }
     }
 }

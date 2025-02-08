@@ -18,7 +18,7 @@ use crate::parse::{
 
 use super::{
     library::ExternFunc,
-    typed::{LoadCache, Ptr, TypedStackSlot, TypedValue, TypedValueImpl, ValueType},
+    typed::{LoadCache, TypedStackSlot, TypedValue, ValueType},
     varstack::VarStack,
     CompileError,
 };
@@ -112,7 +112,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
     fn recurse_let(&mut self, let_: &Let) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let Let { name, value, .. } = let_;
         Ok(self.recurse_i(value)?.map(|tv| {
-            self.stack.set(name.name.to_string(), tv);
+            self.stack.set(name.name.to_string(), tv.clone());
             tv
         }))
     }
@@ -178,15 +178,15 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }
 
         match op {
-            Add => l.add(self.builder, r),
-            Sub => l.sub(self.builder, r),
-            Mul => l.mul(self.builder, r),
-            Div => l.div(self.builder, r),
-            Lt => l.fcmp(self.builder, r, FloatCC::LessThan),
-            Lte => l.fcmp(self.builder, r, FloatCC::LessThanOrEqual),
-            Eq => l.fcmp(self.builder, r, FloatCC::Equal),
-            Gte => l.fcmp(self.builder, r, FloatCC::GreaterThanOrEqual),
-            Gt => l.fcmp(self.builder, r, FloatCC::GreaterThan),
+            Add => l.add(self.builder, &r),
+            Sub => l.sub(self.builder, &r),
+            Mul => l.mul(self.builder, &r),
+            Div => l.div(self.builder, &r),
+            Lt => l.fcmp(self.builder, &r, FloatCC::LessThan),
+            Lte => l.fcmp(self.builder, &r, FloatCC::LessThanOrEqual),
+            Eq => l.fcmp(self.builder, &r, FloatCC::Equal),
+            Gte => l.fcmp(self.builder, &r, FloatCC::GreaterThanOrEqual),
+            Gt => l.fcmp(self.builder, &r, FloatCC::GreaterThan),
             Assign => self.load_cache.store(self.builder, l, r),
         }
         .map(RecurseFlow::Continue)
@@ -233,9 +233,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         let RecurseFlow::Continue(cond_tv) = self.recurse_i(&if_.cond)? else {
             return Ok(RecurseFlow::BlockDone);
         };
-        let cond_v = cond_tv
-            .value(self.builder)
-            .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?;
+        let cond_v = cond_tv.value(self.builder);
 
         let merge_block = self.builder.create_block();
         let then_block = self.builder.create_block();
@@ -268,9 +266,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             let then_ret_args = if then_v.value_type() == ValueType::Unit {
                 vec![]
             } else {
-                vec![then_v
-                    .value(self.builder)
-                    .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
+                vec![then_v.value(self.builder)]
             };
             self.builder.ins().jump(merge_block, &then_ret_args);
 
@@ -295,9 +291,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 let else_ret_args = if else_v.value_type() == ValueType::Unit {
                     vec![]
                 } else {
-                    vec![else_v
-                        .value(self.builder)
-                        .map_err(|e| CompileError::new(e.msg(), if_.span.clone()))?]
+                    vec![else_v.value(self.builder)]
                 };
                 self.builder.ins().jump(merge_block, &else_ret_args);
 
@@ -310,7 +304,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         };
 
         // merge
-        let ret_vt = *match (&then_rec_flw, &else_rec_flw) {
+        let ret_vt = match (&then_rec_flw, &else_rec_flw) {
             (RecurseFlow::Continue((then_vt, _)), RecurseFlow::Continue((else_vt, _))) => {
                 if then_vt == else_vt {
                     then_vt
@@ -323,15 +317,10 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             (RecurseFlow::BlockDone, RecurseFlow::BlockDone) => {
                 return Ok(RecurseFlow::BlockDone);
             }
-        };
+        }.clone();
 
         if ret_vt != ValueType::Unit {
-            let ret_cl_t = ret_vt.cl_type().ok_or_else(|| {
-                CompileError::new(
-                    format!("{ret_vt:?} doesn't have a corresponding CLIF type"),
-                    if_.span.clone(),
-                )
-            })?;
+            let ret_cl_t = ret_vt.cl_type();
             self.builder.append_block_param(merge_block, ret_cl_t);
         }
 
@@ -352,22 +341,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
         let tv = match self.builder.block_params(merge_block) {
             [] => TypedValue::UNIT,
-            [v] => unsafe {
-                match ret_vt {
-                    ValueType::Unit => unreachable!(),
-                    ValueType::ExternPtr(et) => {
-                        TypedValue::from_inner(TypedValueImpl::ExternPtr(Ptr::Value(*v), et))
-                    }
-                    ValueType::ExternPtrRef(et) => {
-                        TypedValue::from_inner(TypedValueImpl::ExternPtrRef(Ptr::Value(*v), et))
-                    }
-                    ValueType::Float => TypedValue::from_inner(TypedValueImpl::Float(*v)),
-                    ValueType::FloatRef => {
-                        TypedValue::from_inner(TypedValueImpl::FloatRef(Ptr::Value(*v)))
-                    }
-                    ValueType::Bool => TypedValue::from_inner(TypedValueImpl::Bool(*v)),
-                }
-            },
+            [v] => unsafe { TypedValue::with_ty_value(ret_vt, *v) },
             _ => unreachable!(),
         };
 
@@ -392,9 +366,9 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
         let break_ts = self.loop_stack.pop().unwrap().1;
 
-        let loop_ty = match break_ts.as_slice() {
+        let loop_vt = match break_ts.as_slice() {
             [] => ValueType::Unit,
-            [(fst, _)] => *fst,
+            [(fst, _)] => fst.clone(),
             [(fst, _), tail @ ..] => {
                 for (el, span) in tail {
                     if el != fst {
@@ -405,17 +379,12 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                     }
                 }
 
-                *fst
+                fst.clone()
             }
         };
 
-        if loop_ty != ValueType::Unit {
-            let merge_block_param_ty = loop_ty.cl_type().ok_or_else(|| {
-                CompileError::new(
-                    format!("{loop_ty:?} doesn't have a corresponding CLIF type"),
-                    loop_.span.clone(),
-                )
-            })?;
+        if loop_vt != ValueType::Unit {
+            let merge_block_param_ty = loop_vt.cl_type();
 
             self.builder
                 .append_block_param(merge_block, merge_block_param_ty);
@@ -427,22 +396,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
         let tv = match self.builder.block_params(merge_block) {
             [] => TypedValue::UNIT,
-            [v] => unsafe {
-                match loop_ty {
-                    ValueType::Unit => unreachable!(),
-                    ValueType::ExternPtr(et) => {
-                        TypedValue::from_inner(TypedValueImpl::ExternPtr(Ptr::Value(*v), et))
-                    }
-                    ValueType::ExternPtrRef(et) => {
-                        TypedValue::from_inner(TypedValueImpl::ExternPtrRef(Ptr::Value(*v), et))
-                    }
-                    ValueType::Float => TypedValue::from_inner(TypedValueImpl::Float(*v)),
-                    ValueType::FloatRef => {
-                        TypedValue::from_inner(TypedValueImpl::FloatRef(Ptr::Value(*v)))
-                    }
-                    ValueType::Bool => TypedValue::from_inner(TypedValueImpl::Bool(*v)),
-                }
-            },
+            [v] => unsafe { TypedValue::with_ty_value(loop_vt, *v) },
             _ => unreachable!(),
         };
 
@@ -466,9 +420,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         let jmp_args = if ret_tv.value_type() == ValueType::Unit {
             vec![]
         } else {
-            vec![ret_tv
-                .value(self.builder)
-                .map_err(|e| CompileError::new(e.msg(), break_.span.clone()))?]
+            vec![ret_tv.value(self.builder)]
         };
 
         self.builder.ins().jump(*merge_block, &jmp_args);

@@ -10,8 +10,8 @@ use cranelift::{
     jit::{JITBuilder, JITModule},
     module::{default_libcall_names, Linkage, Module},
     prelude::{
-        types::{F32, I64},
-        AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder, Signature,
+        types::F32, AbiParam, Configurable, FunctionBuilder, FunctionBuilderContext, InstBuilder,
+        Signature,
     },
 };
 use cranelift_codegen::{settings, Context};
@@ -149,14 +149,10 @@ impl Compiler {
         for (name, func) in stdlib.funcs() {
             let mut sig = module.make_signature();
             for arg in &func.args {
-                sig.params.push(AbiParam::new(arg.cl_type().unwrap()));
+                sig.params.push(AbiParam::new(arg.cl_type()));
             }
-            match func.ret {
-                Some(
-                    ValueType::ExternPtr(_) | ValueType::ExternPtrRef(_) | ValueType::FloatRef,
-                ) => sig.returns.push(AbiParam::new(I64)),
-                Some(ValueType::Float) => sig.returns.push(AbiParam::new(F32)),
-                Some(ValueType::Bool | ValueType::Unit) => panic!(),
+            match &func.ret {
+                Some(vt) => sig.returns.push(AbiParam::new(vt.cl_type())),
                 None => {}
             }
             extern_signatures.insert(name.to_string(), sig);
@@ -231,34 +227,28 @@ impl Compiler {
         builder.append_block_params_for_function_params(block);
         builder.switch_to_block(block);
 
-        let mut storage_tvs =
-            Vec::<(String, Option<TypedValue>, StorageEntryKind, Range<usize>)>::new();
+        let mut storage_tvs = Vec::<(String, TypedValue, StorageEntryKind)>::new();
         for StateEntry { name, init, .. } in &program.state().entries {
             let mut stack = VarStack::new();
             let mut recursor = Recursor::new(&mut builder, &mut stack, None, extern_funs.clone());
 
             let init_v = recursor.recurse(init)?;
-            storage_tvs.push((
-                name.name.clone(),
-                Some(init_v),
-                StorageEntryKind::Internal,
-                init.span(),
-            ));
+            storage_tvs.push((name.name.clone(), init_v, StorageEntryKind::Internal));
         }
         for InputEntry { name, .. } in &program.inputs().entries {
-            storage_tvs.push((name.name.clone(), None, StorageEntryKind::External, 0..0));
+            let zero = TypedValue::float(&mut builder, 0.0);
+            storage_tvs.push((name.name.clone(), zero.clone(), StorageEntryKind::External));
         }
         let mapped_storage = Self::build_state_storage(&storage_tvs)?;
 
-        let zero = TypedValue::float(&mut builder, 0.0);
         for (name, ptr_v) in mapped_storage.typed_values() {
             let init_v = storage_tvs
                 .iter()
-                .find_map(|(id, init_v, _kind, _span)| (id == name).then_some(*init_v))
+                .find_map(|(id, init_v, _kind)| (id == name).then_some(init_v.clone()))
                 .unwrap();
 
             LoadCache::default()
-                .store(&mut builder, ptr_v, init_v.unwrap_or(zero))
+                .store(&mut builder, ptr_v, init_v)
                 .unwrap();
         }
 
@@ -337,9 +327,7 @@ impl Compiler {
             recursor.recurse(expr)?;
         }
 
-        let read_ret = TypedValue::stack_load(&mut builder, retss)
-            .value(&mut builder)
-            .unwrap();
+        let read_ret = TypedValue::stack_load(&mut builder, retss).value(&mut builder);
         builder.ins().return_(&[read_ret]);
 
         log::debug!("step IR:\n{}", builder.func.display());
@@ -362,23 +350,14 @@ impl Compiler {
     }
 
     fn build_state_storage(
-        entries: &[(String, Option<TypedValue>, StorageEntryKind, Range<usize>)],
+        entries: &[(String, TypedValue, StorageEntryKind)],
     ) -> Result<MappedStorage, CompileError> {
         let mut offset = 0usize;
         let mut state_mapping = HashMap::new();
         let mut offsets = HashMap::new();
 
-        for (name, tv, _kind, span) in entries {
-            let abi_type = tv
-                .map(TypedValue::value_type)
-                .unwrap_or(ValueType::Float)
-                .cl_type()
-                .ok_or_else(|| {
-                    CompileError::new(
-                        format!("{tv:?} doesn't have a corresponding CL type"),
-                        span.clone(),
-                    )
-                })?;
+        for (name, tv, _kind) in entries {
+            let abi_type = tv.value_type().cl_type();
 
             // Assumption that align is the same as size is overly restrictive
             let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
@@ -395,11 +374,11 @@ impl Compiler {
         let storage_len = offset;
         let storage = StorageBuf::new(storage_len);
 
-        for (name, tv, kind, _span) in entries {
+        for (name, tv, kind) in entries {
             let offset = offsets.get(name).unwrap();
             state_mapping.insert(name.clone(), unsafe {
                 StorageEntry {
-                    abi: tv.map(TypedValue::value_type).unwrap_or(ValueType::Float),
+                    abi: tv.value_type(),
                     kind: *kind,
                     ptr: storage.get(*offset).as_ptr() as *mut u8,
                 }

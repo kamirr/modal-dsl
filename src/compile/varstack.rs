@@ -24,7 +24,7 @@ impl VarStack {
     pub fn get(&self, name: &str) -> Option<TypedValue> {
         for layer in self.inner.iter().rev() {
             if let Some(entry) = layer.get(name) {
-                return Some(*entry);
+                return Some(entry.clone());
             }
         }
 

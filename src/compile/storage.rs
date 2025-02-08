@@ -4,9 +4,7 @@ use std::{
     ptr::NonNull,
 };
 
-use crate::compile::typed::Ptr;
-
-use super::typed::{TypedValue, TypedValueImpl, ValueType};
+use super::typed::{TypedValue, ValueType};
 
 #[derive(Debug)]
 pub struct StorageBuf {
@@ -77,7 +75,7 @@ pub enum StorageEntryKind {
     External,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct StorageEntry {
     pub abi: ValueType,
     pub kind: StorageEntryKind,
@@ -106,7 +104,7 @@ impl MappedStorage {
     }
 
     pub fn get(&self, name: &str) -> Option<StorageEntry> {
-        self.mapping.get(name).copied()
+        self.mapping.get(name).cloned()
     }
 
     pub fn typed_values(&self) -> impl Iterator<Item = (&str, TypedValue)> {
@@ -117,13 +115,7 @@ impl MappedStorage {
                 //
                 // This is guaranteed by `MappedStorage::new` invariants.
                 unsafe {
-                    TypedValue::from_inner(match entry.abi {
-                        ValueType::ExternPtr(extern_type) => {
-                            TypedValueImpl::ExternPtrRef(Ptr::Literal(entry.ptr), extern_type)
-                        }
-                        ValueType::Float => TypedValueImpl::FloatRef(Ptr::Literal(entry.ptr)),
-                        _ => unreachable!(),
-                    })
+                    TypedValue::with_ty_ptr(ValueType::Ref(Box::new(entry.abi.clone())), entry.ptr)
                 }
             })
         })
