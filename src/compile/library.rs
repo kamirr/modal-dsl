@@ -5,6 +5,12 @@ use super::typed::ValueType;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ExternType(u32);
 
+impl ExternType {
+    pub fn id(self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ExternTypeReg {
     types: HashMap<String, ExternType>,

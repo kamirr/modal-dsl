@@ -195,21 +195,23 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
     fn recurse_yield(&mut self, yield_: &Yield) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let Yield { value, span } = yield_;
-        let Some(retss) = self.retss else {
-            panic!("retss not provided")
-        };
 
         let RecurseFlow::Continue(tv) = self.recurse_i(value)? else {
             return Ok(RecurseFlow::BlockDone);
         };
 
-        let ret_tv = self
-            .load_cache
-            .autoderef(self.builder, tv)
-            .stack_store(self.builder, retss)
+        let to_store = self.load_cache.autoderef(self.builder, tv.clone());
+
+        let Some(retss) = &self.retss else {
+            log::warn!("yield evaluated in state context (no return stack slot)");
+            return Ok(RecurseFlow::Continue(tv));
+        };
+
+        retss
+            .store(self.builder, &to_store)
             .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
 
-        Ok(RecurseFlow::Continue(ret_tv))
+        Ok(RecurseFlow::Continue(to_store))
     }
 
     fn recurse_call(&mut self, call: &Call) -> Result<RecurseFlow<TypedValue>, CompileError> {

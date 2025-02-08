@@ -8,33 +8,69 @@ use cranelift_codegen::ir::{FuncRef, StackSlot};
 
 use super::library::{ExternFunc, ExternType};
 
-#[derive(Clone, Copy, Debug)]
-enum TypedStackSlotImpl {
-    Float(StackSlot),
+#[derive(Clone, Debug)]
+pub struct TypedStackSlot {
+    ss: StackSlot,
+    vt: ValueType,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct TypedStackSlot(TypedStackSlotImpl);
-
 impl TypedStackSlot {
-    pub fn float() -> impl FnOnce(&mut FunctionBuilder<'_>) -> TypedStackSlot {
-        |builder: &mut FunctionBuilder<'_>| {
-            TypedStackSlot(TypedStackSlotImpl::Float(builder.create_sized_stack_slot(
-                StackSlotData {
-                    kind: StackSlotKind::ExplicitSlot,
-                    size: 4,
-                    align_shift: 2,
-                },
-            )))
+    pub fn new(builder: &mut FunctionBuilder<'_>, vt: ValueType) -> Self {
+        let size = vt.cl_type().bytes();
+
+        let align_shift = match size {
+            0 => unreachable!(),
+            1 => 0,     // align = 1
+            2 => 1,     // align = 2
+            3 | 4 => 2, // align = 4
+            _ => 3,     // align = 8
+        };
+
+        log::debug!(
+            "Stack slot data for {} is: size={}, align_shift={}",
+            vt.pretty(),
+            size,
+            align_shift
+        );
+
+        let ss = builder.create_sized_stack_slot(StackSlotData {
+            kind: StackSlotKind::ExplicitSlot,
+            size,
+            align_shift,
+        });
+
+        TypedStackSlot { ss, vt }
+    }
+
+    pub fn load(&self, builder: &mut FunctionBuilder<'_>) -> TypedValue {
+        let v = builder.ins().stack_load(self.vt.cl_type(), self.ss, 0);
+        unsafe { TypedValue::with_ty_value(self.vt.clone(), v) }
+    }
+
+    pub fn store(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        tv: &TypedValue,
+    ) -> Result<(), TypedOpError> {
+        if &self.vt != &tv.value_type() {
+            return Err(TypedOpError::InvalidStore {
+                slot_vt: self.vt.clone(),
+                found: tv.value_type(),
+            });
         }
+
+        let v = tv.value(builder);
+        builder.ins().stack_store(v, self.ss, 0);
+
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum TypedOpError {
     InvalidStore {
-        slot: TypedStackSlot,
-        value: TypedValue,
+        slot_vt: ValueType,
+        found: ValueType,
     },
     InvalidOp {
         lhs: TypedValue,
@@ -55,11 +91,20 @@ pub enum TypedOpError {
 impl TypedOpError {
     pub fn msg(&self) -> String {
         match self {
-            TypedOpError::InvalidStore { slot, value } => {
-                format!("Can't store {value:?} in {slot:?}")
+            TypedOpError::InvalidStore { slot_vt, found } => {
+                format!(
+                    "Can't store {} in a stack slot of type {}",
+                    found.pretty(),
+                    slot_vt.pretty()
+                )
             }
             TypedOpError::InvalidOp { lhs, rhs, op } => {
-                format!("Operation {lhs:?} {op} {rhs:?} undefined")
+                format!(
+                    "Operation {} {} {} undefined",
+                    lhs.value_type().pretty(),
+                    op,
+                    rhs.value_type().pretty()
+                )
             }
             TypedOpError::InvalidCallArgsN { expected, found } => {
                 format!("Expected {expected} arguments, found {found}")
@@ -69,7 +114,12 @@ impl TypedOpError {
                 found,
                 arg_n,
             } => {
-                format!("Argument #{arg_n} expected type {expected:?}, found {found:?}")
+                format!(
+                    "Argument #{} expected type {}, found {}",
+                    arg_n,
+                    expected.pretty(),
+                    found.pretty()
+                )
             }
         }
     }
@@ -233,6 +283,16 @@ impl ValueType {
             ValueType::Bool => I8,
         }
     }
+
+    pub fn pretty(&self) -> String {
+        match self {
+            ValueType::Unit => String::from("Unit"),
+            ValueType::ExternPtr(et) => format!("Extern<{}>", et.id()),
+            ValueType::Float => String::from("Float"),
+            ValueType::Bool => String::from("Bool"),
+            ValueType::Ref(vt) => format!("&{}", vt.pretty()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -282,34 +342,6 @@ impl TypedValue {
             TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _et) => ptr,
             TypedValueImpl::Ref(Ptr::Literal(ptr), _vt) => ptr,
             _ => panic!(),
-        }
-    }
-
-    pub fn stack_load(builder: &mut FunctionBuilder<'_>, tss: TypedStackSlot) -> Self {
-        let TypedStackSlot(tssi) = tss;
-        match tssi {
-            TypedStackSlotImpl::Float(ss) => {
-                TypedValue(TypedValueImpl::Float(builder.ins().stack_load(F32, ss, 0)))
-            }
-        }
-    }
-
-    pub fn stack_store(
-        &self,
-        builder: &mut FunctionBuilder<'_>,
-        tss: TypedStackSlot,
-    ) -> Result<Self, TypedOpError> {
-        let TypedValue(tvi) = self;
-        let TypedStackSlot(tssi) = tss;
-        match (tvi, tssi) {
-            (TypedValueImpl::Float(value), TypedStackSlotImpl::Float(ss)) => Ok({
-                builder.ins().stack_store(*value, ss, 0);
-                TypedValue::UNIT
-            }),
-            _ => Err(TypedOpError::InvalidStore {
-                slot: tss,
-                value: self.clone(),
-            }),
         }
     }
 

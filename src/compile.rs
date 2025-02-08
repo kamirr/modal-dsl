@@ -319,15 +319,19 @@ impl Compiler {
             stack.set(name.to_string(), ref_tv);
         }
 
-        let retss = TypedStackSlot::float()(&mut builder);
+        let retss = TypedStackSlot::new(&mut builder, ValueType::Float);
 
-        let mut recursor =
-            Recursor::new(&mut builder, &mut stack, Some(retss), extern_funs.clone());
+        let mut recursor = Recursor::new(
+            &mut builder,
+            &mut stack,
+            Some(retss.clone()),
+            extern_funs.clone(),
+        );
         for expr in &program.step().block.exprs {
             recursor.recurse(expr)?;
         }
 
-        let read_ret = TypedValue::stack_load(&mut builder, retss).value(&mut builder);
+        let read_ret = retss.load(&mut builder).value(&mut builder);
         builder.ins().return_(&[read_ret]);
 
         log::debug!("step IR:\n{}", builder.func.display());
