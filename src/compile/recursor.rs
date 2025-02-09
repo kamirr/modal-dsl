@@ -391,9 +391,9 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             self.builder.ins().jump(loop_block, &[]);
         }
 
-        let break_ts = self.loop_stack.pop().unwrap().1;
+        let break_vts = self.loop_stack.pop().unwrap().1;
 
-        let loop_vt = match break_ts.as_slice() {
+        let loop_vt = match break_vts.as_slice() {
             [] => ValueType::Unit,
             [(fst, _)] => fst.clone(),
             [(fst, _), tail @ ..] => {
