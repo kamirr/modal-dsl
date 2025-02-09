@@ -77,8 +77,8 @@ pub enum TypedOpError {
         op: &'static str,
     },
     InvalidOp {
-        lhs: TypedValue,
-        rhs: TypedValue,
+        lhs: ValueType,
+        rhs: ValueType,
         op: &'static str,
     },
     InvalidCallArgsN {
@@ -108,9 +108,9 @@ impl TypedOpError {
             TypedOpError::InvalidOp { lhs, rhs, op } => {
                 format!(
                     "Operation {} {} {} undefined",
-                    lhs.value_type().pretty(),
+                    lhs.pretty(),
                     op,
-                    rhs.value_type().pretty()
+                    rhs.pretty()
                 )
             }
             TypedOpError::InvalidCallArgsN { expected, found } => {
@@ -214,16 +214,16 @@ impl LoadCache {
 
         let TypedValueImpl::Ref(dst_ptr, dst_vt) = &dsti else {
             return Err(TypedOpError::InvalidOp {
-                lhs: dst.clone(),
-                rhs: src.clone(),
+                lhs: dst.value_type(),
+                rhs: src.value_type(),
                 op: "=",
             });
         };
 
         if dst_vt != &src.value_type() {
             return Err(TypedOpError::InvalidOp {
-                lhs: dst,
-                rhs: src,
+                lhs: dst.value_type(),
+                rhs: src.value_type(),
                 op: "=",
             });
         }
@@ -414,8 +414,8 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self.clone(),
-                rhs: other.clone(),
+                lhs: self.value_type(),
+                rhs: other.value_type(),
                 op: "+",
             });
         };
@@ -434,8 +434,8 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self.clone(),
-                rhs: other.clone(),
+                lhs: self.value_type(),
+                rhs: other.value_type(),
                 op: "-",
             });
         };
@@ -454,8 +454,8 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self.clone(),
-                rhs: other.clone(),
+                lhs: self.value_type(),
+                rhs: other.value_type(),
                 op: "*",
             });
         };
@@ -474,8 +474,8 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self.clone(),
-                rhs: other.clone(),
+                lhs: self.value_type(),
+                rhs: other.value_type(),
                 op: "/",
             });
         };
@@ -495,8 +495,8 @@ impl TypedValue {
 
         let (TypedValueImpl::Float(l), TypedValueImpl::Float(r)) = (l, r) else {
             return Err(TypedOpError::InvalidOp {
-                lhs: self.clone(),
-                rhs: other.clone(),
+                lhs: self.value_type(),
+                rhs: other.value_type(),
                 op: "<",
             });
         };
