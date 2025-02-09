@@ -61,6 +61,7 @@ mod tests {
         literal::{Literal, LiteralValue},
         loop_::Break,
         path::Ident,
+        unop::{Unop, UnopKind},
     };
     use pretty_assertions::assert_eq;
 
@@ -159,8 +160,12 @@ mod tests {
                     span: 29..35,
                 },
                 Some(Expr::Block(Block {
-                    exprs: vec![Expr::Literal(Literal {
-                        value: LiteralValue::Float(-1.0),
+                    exprs: vec![Expr::Unop(Unop {
+                        expr: Box::new(Expr::Literal(Literal {
+                            value: LiteralValue::Float(1.0),
+                            span: 43..44,
+                        })),
+                        op: UnopKind::Neg,
                         span: 42..44,
                     })],
                     ret_last: true,

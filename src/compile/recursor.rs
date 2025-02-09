@@ -13,6 +13,7 @@ use crate::parse::{
     literal::{Literal, LiteralValue},
     loop_::{Break, Loop},
     path::Ident,
+    unop::{Unop, UnopKind},
     yield_::Yield,
 };
 
@@ -90,6 +91,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             Expr::Var(var) => self.recurse_var(var),
             Expr::Block(block) => self.recurse_block(block),
             Expr::Binop(binop) => self.recurse_binop(binop),
+            Expr::Unop(unop) => self.recurse_unop(unop),
             Expr::Yield(yield_) => self.recurse_yield(yield_),
             Expr::Call(call) => self.recurse_call(call),
             Expr::If(if_) => self.recurse_if(if_),
@@ -169,11 +171,11 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
 
         match op {
             Add | Sub | Mul | Div | Lt | Lte | Eq | Gte | Gt => {
-                l = self.load_cache.autoderef(self.builder, l);
-                r = self.load_cache.autoderef(self.builder, r);
+                l = l.autoderef(self.builder, &mut self.load_cache);
+                r = r.autoderef(self.builder, &mut self.load_cache);
             }
             Assign => {
-                r = self.load_cache.autoderef(self.builder, r);
+                r = r.autoderef(self.builder, &mut self.load_cache);
             }
         }
 
@@ -193,6 +195,21 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         .map_err(|e| CompileError::new(e.msg(), span.clone()))
     }
 
+    fn recurse_unop(&mut self, unop: &Unop) -> Result<RecurseFlow<TypedValue>, CompileError> {
+        let RecurseFlow::Continue(arg) = self.recurse_i(&unop.expr)? else {
+            return Ok(RecurseFlow::BlockDone);
+        };
+
+        let tv = match unop.op {
+            UnopKind::Deref => arg.deref(self.builder, &mut self.load_cache),
+            UnopKind::Neg => arg.neg(self.builder),
+            UnopKind::Not => arg.not(self.builder),
+        }
+        .map_err(|e| CompileError::new(e.msg(), unop.span.clone()))?;
+
+        Ok(RecurseFlow::Continue(tv))
+    }
+
     fn recurse_yield(&mut self, yield_: &Yield) -> Result<RecurseFlow<TypedValue>, CompileError> {
         let Yield { value, span } = yield_;
 
@@ -200,7 +217,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             return Ok(RecurseFlow::BlockDone);
         };
 
-        let to_store = self.load_cache.autoderef(self.builder, tv.clone());
+        let to_store = tv.autoderef(self.builder, &mut self.load_cache);
 
         let Some(retss) = &self.retss else {
             log::warn!("yield evaluated in state context (no return stack slot)");
@@ -220,7 +237,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             let RecurseFlow::Continue(arg_tv) = self.recurse_i(arg)? else {
                 return Ok(RecurseFlow::BlockDone);
             };
-            arg_tvs.push(self.load_cache.autoderef(self.builder, arg_tv));
+            arg_tvs.push(arg_tv.autoderef(self.builder, &mut self.load_cache));
         }
 
         let (func_ref, func_desc) = self.extern_funs.get(&call.path.0[0].name).unwrap();
@@ -236,7 +253,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             return Ok(RecurseFlow::BlockDone);
         };
 
-        let cond_tv = self.load_cache.autoderef(self.builder, cond_tv);
+        let cond_tv = cond_tv.autoderef(self.builder, &mut self.load_cache);
 
         if cond_tv.value_type() != ValueType::Bool {
             return Err(CompileError {

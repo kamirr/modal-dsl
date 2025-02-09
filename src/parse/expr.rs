@@ -18,6 +18,7 @@ use super::{
     literal::Literal,
     loop_::{Break, Loop},
     path::Ident,
+    unop::{Unop, UnopKind},
     yield_::Yield,
 };
 
@@ -33,6 +34,7 @@ pub enum Expr {
     Yield(Yield),
     Literal(Literal),
     Binop(Binop),
+    Unop(Unop),
 }
 
 impl Expr {
@@ -52,11 +54,35 @@ impl Expr {
                 .padded()
                 .boxed();
 
-            let product = atom
+            let unop = choice((
+                UnopKind::Deref.parser(),
+                UnopKind::Neg.parser(),
+                UnopKind::Not.parser(),
+            ))
+            .map_with_span(|unop_kind, span| (unop_kind, span))
+            .repeated()
+            .then(atom)
+            .map(|(unop_kinds, atom)| {
+                unop_kinds
+                    .into_iter()
+                    .rev()
+                    .fold(atom, |expr, (unop_kind, kind_span)| {
+                        let span = kind_span.start..expr.span().end;
+                        Unop {
+                            expr: Box::new(expr),
+                            op: unop_kind,
+                            span,
+                        }
+                        .into()
+                    })
+            })
+            .boxed();
+
+            let product = unop
                 .clone()
                 .then(
                     choice((BinopKind::Mul.parser(), BinopKind::Div.parser()))
-                        .then(atom.clone())
+                        .then(unop.clone())
                         .repeated(),
                 )
                 .map(|(lhs, seq)| {
@@ -129,6 +155,7 @@ impl Expr {
             Expr::Yield(yield_) => yield_.span.clone(),
             Expr::Literal(literal) => literal.span.clone(),
             Expr::Binop(binop) => binop.span.clone(),
+            Expr::Unop(unop) => unop.span.clone(),
         }
     }
 }

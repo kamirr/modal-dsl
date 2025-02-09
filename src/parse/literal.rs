@@ -49,17 +49,12 @@ impl Literal {
                 }
             });
 
-        let num = just('-')
-            .or_not()
-            .then(text::int(10))
+        let num = text::int(10)
             .then(frac.or_not())
             .then(exp.or_not())
             .boxed()
-            .map(|(((sgn, digits), frac), exp)| {
+            .map(|((digits, frac), exp)| {
                 let mut text = String::new();
-                if let Some(sgn) = sgn {
-                    text.push(sgn);
-                }
                 text.push_str(digits.as_str());
                 if let Some(frac) = frac {
                     text.push_str(frac.as_str());

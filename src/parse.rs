@@ -17,6 +17,7 @@ pub mod loop_;
 pub mod path;
 pub mod state;
 pub mod step;
+pub mod unop;
 pub mod yield_;
 
 pub mod kwords {

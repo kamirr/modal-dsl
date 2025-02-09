@@ -72,6 +72,10 @@ pub enum TypedOpError {
         slot_vt: ValueType,
         found: ValueType,
     },
+    InvalidUnop {
+        arg: ValueType,
+        op: &'static str,
+    },
     InvalidOp {
         lhs: TypedValue,
         rhs: TypedValue,
@@ -97,6 +101,9 @@ impl TypedOpError {
                     found.pretty(),
                     slot_vt.pretty()
                 )
+            }
+            TypedOpError::InvalidUnop { arg, op } => {
+                format!("Operation {}{} undefined", op, arg.pretty())
             }
             TypedOpError::InvalidOp { lhs, rhs, op } => {
                 format!(
@@ -127,7 +134,7 @@ impl TypedOpError {
 
 #[derive(Debug, Clone)]
 pub struct LoadCache {
-    layers: Vec<HashMap<TypedValue, TypedValue>>,
+    layers: Vec<HashMap<Ptr, TypedValue>>,
 }
 
 impl Default for LoadCache {
@@ -168,35 +175,33 @@ impl LoadCache {
         self.layers.pop().unwrap();
     }
 
-    pub fn autoderef(&mut self, builder: &mut FunctionBuilder<'_>, tv: TypedValue) -> TypedValue {
+    pub fn deref(
+        &mut self,
+        builder: &mut FunctionBuilder<'_>,
+        ptr: Ptr,
+        vt: ValueType,
+    ) -> TypedValue {
+        if vt == ValueType::Unit {
+            return TypedValue::UNIT;
+        }
+
         for layer in self.layers.iter().rev() {
-            if let Some(cached) = layer.get(&tv).cloned() {
-                log::debug!("re-used load: *{tv:?} = {cached:?}");
+            if let Some(cached) = layer.get(&ptr).cloned() {
+                log::debug!("re-used load: *{ptr:?} = {cached:?}");
                 return cached;
             }
         }
 
-        let TypedValue(tvi) = &tv;
-        let result = match tvi {
-            TypedValueImpl::Ref(ptr, vt) => {
-                // loads of Unit are a no-op
-                if vt == &ValueType::Unit {
-                    return TypedValue::UNIT;
-                }
+        let ptr_v = ptr.value(builder);
+        let v = builder
+            .ins()
+            .load(vt.cl_type(), MemFlags::trusted(), ptr_v, 0);
 
-                let ptr = ptr.value(builder);
-                let v = builder
-                    .ins()
-                    .load(vt.cl_type(), MemFlags::trusted(), ptr, 0);
+        let vt = unsafe { TypedValue::with_ty_value(vt.clone(), v) };
 
-                unsafe { TypedValue::with_ty_value(vt.clone(), v) }
-            }
-            other => return TypedValue(other.clone()),
-        };
-
-        log::debug!("cached load: *{tv:?} = {result:?}");
-        self.layers.last_mut().unwrap().insert(tv, result.clone());
-        result
+        log::debug!("cached load: *{ptr:?} = {vt:?}");
+        self.layers.last_mut().unwrap().insert(ptr, vt.clone());
+        vt
     }
 
     pub fn store(
@@ -242,7 +247,7 @@ impl LoadCache {
         } else {
             log::debug!("clear load cache: {dst:?}");
             for layer in &mut self.layers {
-                layer.remove(&dst);
+                layer.remove(&dst_ptr);
             }
         }
 
@@ -251,13 +256,13 @@ impl LoadCache {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum Ptr {
+pub enum Ptr {
     Literal(*mut u8),
     Value(Value),
 }
 
 impl Ptr {
-    pub(crate) fn value(self, builder: &mut FunctionBuilder<'_>) -> Value {
+    pub fn value(self, builder: &mut FunctionBuilder<'_>) -> Value {
         match self {
             Ptr::Literal(iptr) => builder.ins().iconst(I64, iptr as i64),
             Ptr::Value(value) => value,
@@ -342,6 +347,61 @@ impl TypedValue {
         };
 
         TypedValue(tvi)
+    }
+
+    pub fn deref(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        cache: &mut LoadCache,
+    ) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(arg) = self;
+        let TypedValueImpl::Ref(ptr, vt) = arg else {
+            return Err(TypedOpError::InvalidUnop {
+                arg: self.value_type(),
+                op: "*",
+            });
+        };
+
+        Ok(cache.deref(builder, *ptr, vt.clone()))
+    }
+
+    pub fn autoderef(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        cache: &mut LoadCache,
+    ) -> TypedValue {
+        let TypedValue(arg) = self;
+        let TypedValueImpl::Ref(ptr, vt) = arg else {
+            return self.clone();
+        };
+
+        cache.deref(builder, *ptr, vt.clone())
+    }
+
+    pub fn neg(&self, builder: &mut FunctionBuilder<'_>) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(arg) = self;
+        let TypedValueImpl::Float(arg) = arg else {
+            return Err(TypedOpError::InvalidUnop {
+                arg: self.value_type(),
+                op: "-",
+            });
+        };
+
+        let v = builder.ins().fneg(*arg);
+        Ok(TypedValue(TypedValueImpl::Float(v)))
+    }
+
+    pub fn not(&self, builder: &mut FunctionBuilder<'_>) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(arg) = self;
+        let TypedValueImpl::Bool(arg) = arg else {
+            return Err(TypedOpError::InvalidUnop {
+                arg: self.value_type(),
+                op: "!",
+            });
+        };
+
+        let v = builder.ins().bnot(*arg);
+        Ok(TypedValue(TypedValueImpl::Bool(v)))
     }
 
     pub fn add(
