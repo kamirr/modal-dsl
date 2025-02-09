@@ -319,7 +319,7 @@ impl Compiler {
             stack.set(name.to_string(), ref_tv);
         }
 
-        let retss = TypedStackSlot::new(&mut builder, ValueType::Float);
+        let retss = TypedStackSlot::new(&mut builder, ValueType::Float, 1);
 
         let mut recursor = Recursor::new(
             &mut builder,
@@ -331,7 +331,7 @@ impl Compiler {
             recursor.recurse(expr)?;
         }
 
-        let read_ret = retss.load(&mut builder).value(&mut builder);
+        let read_ret = retss.load(&mut builder, 0).value(&mut builder);
         builder.ins().return_(&[read_ret]);
 
         log::debug!("step IR:\n{}", builder.func.display());

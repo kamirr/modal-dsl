@@ -56,7 +56,7 @@ impl Call {
 mod tests {
     use crate::parse::{
         literal::{Literal, LiteralValue},
-        path::Ident,
+        path::{Ident, Segment},
     };
     use pretty_assertions::assert_eq;
 
@@ -68,7 +68,11 @@ mod tests {
             (
                 &["foo(0)"][..],
                 Call {
-                    path: Path(vec![Ident::new("foo", 0..3)]),
+                    path: Path {
+                        base: Ident::new("foo", 0..3),
+                        tail: vec![],
+                        span: 0..3,
+                    },
                     args: vec![Expr::Literal(Literal {
                         value: LiteralValue::Float(0.0),
                         span: 4..5,
@@ -79,7 +83,11 @@ mod tests {
             (
                 &["foo ( 0 )"][..],
                 Call {
-                    path: Path(vec![Ident::new("foo", 0..3)]),
+                    path: Path {
+                        base: Ident::new("foo", 0..3),
+                        tail: vec![],
+                        span: 0..3,
+                    },
                     args: vec![Expr::Literal(Literal {
                         value: LiteralValue::Float(0.0),
                         span: 6..7,
@@ -90,11 +98,14 @@ mod tests {
             (
                 &["foo.bar.baz(21,33)"],
                 Call {
-                    path: Path(vec![
-                        Ident::new("foo", 0..3),
-                        Ident::new("bar", 4..7),
-                        Ident::new("baz", 8..11),
-                    ]),
+                    path: Path {
+                        base: Ident::new("foo", 0..3),
+                        tail: vec![
+                            Segment::Member(Ident::new("bar", 4..7)),
+                            Segment::Member(Ident::new("baz", 8..11)),
+                        ],
+                        span: 0..11,
+                    },
                     args: vec![
                         Expr::Literal(Literal {
                             value: LiteralValue::Float(21.0),
@@ -111,11 +122,14 @@ mod tests {
             (
                 &["foo.bar.baz ( 2.1e1, 33.0 ,)"],
                 Call {
-                    path: Path(vec![
-                        Ident::new("foo", 0..3),
-                        Ident::new("bar", 4..7),
-                        Ident::new("baz", 8..11),
-                    ]),
+                    path: Path {
+                        base: Ident::new("foo", 0..3),
+                        tail: vec![
+                            Segment::Member(Ident::new("bar", 4..7)),
+                            Segment::Member(Ident::new("baz", 8..11)),
+                        ],
+                        span: 0..11,
+                    },
                     args: vec![
                         Expr::Literal(Literal {
                             value: LiteralValue::Float(21.0),
@@ -132,11 +146,23 @@ mod tests {
             (
                 &["foo(bar(baz()))"],
                 Call {
-                    path: Path(vec![Ident::new("foo", 0..3)]),
+                    path: Path {
+                        base: Ident::new("foo", 0..3),
+                        tail: vec![],
+                        span: 0..3,
+                    },
                     args: vec![Expr::Call(Call {
-                        path: Path(vec![Ident::new("bar", 4..7)]),
+                        path: Path {
+                            base: Ident::new("bar", 4..7),
+                            tail: vec![],
+                            span: 4..7,
+                        },
                         args: vec![Expr::Call(Call {
-                            path: Path(vec![Ident::new("baz", 8..11)]),
+                            path: Path {
+                                base: Ident::new("baz", 8..11),
+                                tail: vec![],
+                                span: 8..11,
+                            },
                             args: vec![],
                             span: 8..13,
                         })],
@@ -149,10 +175,7 @@ mod tests {
 
         for (texts, expected) in cases {
             for &text in texts {
-                assert_eq!(
-                    Expr::parser().parse(text),
-                    Ok(Expr::Call(expected.clone()))
-                )
+                assert_eq!(Expr::parser().parse(text), Ok(Expr::Call(expected.clone())))
             }
         }
     }

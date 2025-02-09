@@ -4,6 +4,7 @@ use cranelift::prelude::{FloatCC, FunctionBuilder, InstBuilder};
 use cranelift_codegen::ir::{entities, FuncRef};
 
 use crate::parse::{
+    array::Array,
     binop::{Binop, BinopKind},
     block::Block,
     call::Call,
@@ -12,14 +13,14 @@ use crate::parse::{
     let_::Let,
     literal::{Literal, LiteralValue},
     loop_::{Break, Loop},
-    path::Ident,
+    path::{Number, Path, Segment},
     unop::{Unop, UnopKind},
     yield_::Yield,
 };
 
 use super::{
     library::ExternFunc,
-    typed::{LoadCache, TypedStackSlot, TypedValue, ValueType},
+    typed::{ArrayBuilder, LoadCache, TypedStackSlot, TypedValue, ValueType},
     varstack::VarStack,
     CompileError,
 };
@@ -88,7 +89,8 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         match expr {
             Expr::Literal(literal) => self.recurse_literal(literal),
             Expr::Let(let_) => self.recurse_let(let_),
-            Expr::Var(var) => self.recurse_var(var),
+            Expr::Var(path) => self.recurse_var(path),
+            Expr::Array(array) => self.recurse_array(array),
             Expr::Block(block) => self.recurse_block(block),
             Expr::Binop(binop) => self.recurse_binop(binop),
             Expr::Unop(unop) => self.recurse_unop(unop),
@@ -119,14 +121,32 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }))
     }
 
-    fn recurse_var(&mut self, var: &Ident) -> Result<RecurseFlow<TypedValue>, CompileError> {
-        let Ident { name, span } = var;
-        self.stack
-            .get(&name)
-            .map(RecurseFlow::Continue)
-            .ok_or_else(|| {
-                CompileError::new(format!("Variable {} not in scope", name), span.clone())
-            })
+    fn recurse_var(&mut self, var: &Path) -> Result<RecurseFlow<TypedValue>, CompileError> {
+        let mut tv = self.stack.get(&var.base.name).ok_or_else(|| {
+            CompileError::new(
+                format!("Variable {} not in scope", var.base.name),
+                var.span.clone(),
+            )
+        })?;
+
+        for segment in &var.tail {
+            match segment {
+                Segment::Member(_ident) => {
+                    return Err(CompileError::new(
+                        "Member access not implemented",
+                        segment.span(),
+                    ))
+                }
+                Segment::Index(Number { n, .. }) => {
+                    tv = tv
+                        .autoderef(self.builder, &mut self.load_cache)
+                        .index(self.builder, *n)
+                        .map_err(|e| CompileError::new(e.msg(), segment.span()))?;
+                }
+            }
+        }
+
+        Ok(RecurseFlow::Continue(tv))
     }
 
     fn recurse_block(&mut self, block: &Block) -> Result<RecurseFlow<TypedValue>, CompileError> {
@@ -150,6 +170,22 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         } else {
             TypedValue::UNIT
         }))
+    }
+
+    fn recurse_array(&mut self, array: &Array) -> Result<RecurseFlow<TypedValue>, CompileError> {
+        let mut array_builder = ArrayBuilder::new();
+        for expr in &array.exprs {
+            let RecurseFlow::Continue(tv) = self.recurse_i(expr)? else {
+                return Ok(RecurseFlow::BlockDone);
+            };
+
+            array_builder
+                .append(tv)
+                .map_err(|e| CompileError::new(e.msg(), expr.span()))?;
+        }
+
+        let array_tv = array_builder.build(self.builder);
+        Ok(RecurseFlow::Continue(array_tv))
     }
 
     fn recurse_binop(&mut self, binop: &Binop) -> Result<RecurseFlow<TypedValue>, CompileError> {
@@ -225,7 +261,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         };
 
         retss
-            .store(self.builder, &to_store)
+            .store(self.builder, &to_store, 0)
             .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
 
         Ok(RecurseFlow::Continue(to_store))
@@ -240,7 +276,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
             arg_tvs.push(arg_tv.autoderef(self.builder, &mut self.load_cache));
         }
 
-        let (func_ref, func_desc) = self.extern_funs.get(&call.path.0[0].name).unwrap();
+        let (func_ref, func_desc) = self.extern_funs.get(&call.path.base.name).unwrap();
 
         let tv = TypedValue::call(self.builder, *func_ref, func_desc, arg_tvs.as_slice())
             .map_err(|e| CompileError::new(e.msg(), call.span.clone()))?;

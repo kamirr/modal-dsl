@@ -42,7 +42,7 @@ mod tests {
         binop::{Binop, BinopKind},
         let_::Let,
         literal::{Literal, LiteralValue},
-        path::Ident,
+        path::{Ident, Path},
         yield_::Yield,
     };
     use pretty_assertions::assert_eq;
@@ -105,8 +105,12 @@ mod tests {
                             Yield {
                                 value: Box::new(
                                     Binop {
-                                        left: Box::new(Ident::new("two", 43..46).into()),
-                                        right: Box::new(Ident::new("three", 49..54).into()),
+                                        left: Box::new(
+                                            Path::new_single(Ident::new("two", 43..46)).into(),
+                                        ),
+                                        right: Box::new(
+                                            Path::new_single(Ident::new("three", 49..54)).into(),
+                                        ),
                                         op: BinopKind::Div,
                                         span: 43..54,
                                     }

@@ -12,10 +12,14 @@ use super::library::{ExternFunc, ExternType};
 pub struct TypedStackSlot {
     ss: StackSlot,
     vt: ValueType,
+    el_size: u32,
+    count: u32,
 }
 
 impl TypedStackSlot {
-    pub fn new(builder: &mut FunctionBuilder<'_>, vt: ValueType) -> Self {
+    pub fn new(builder: &mut FunctionBuilder<'_>, vt: ValueType, count: u32) -> Self {
+        assert!(count >= 1, "Cannot create zero-size stack slot");
+
         let size = vt.cl_type().bytes();
 
         let align_shift = match size {
@@ -35,15 +39,28 @@ impl TypedStackSlot {
 
         let ss = builder.create_sized_stack_slot(StackSlotData {
             kind: StackSlotKind::ExplicitSlot,
-            size,
+            size: size * count,
             align_shift,
         });
 
-        TypedStackSlot { ss, vt }
+        TypedStackSlot {
+            ss,
+            vt,
+            el_size: size,
+            count,
+        }
     }
 
-    pub fn load(&self, builder: &mut FunctionBuilder<'_>) -> TypedValue {
-        let v = builder.ins().stack_load(self.vt.cl_type(), self.ss, 0);
+    pub fn load(&self, builder: &mut FunctionBuilder<'_>, offset: u32) -> TypedValue {
+        assert!(
+            offset < self.count,
+            "out-of-bounds load of {self:?}, offset={offset}"
+        );
+
+        let v =
+            builder
+                .ins()
+                .stack_load(self.vt.cl_type(), self.ss, (self.el_size * offset) as i32);
         unsafe { TypedValue::with_ty_value(self.vt.clone(), v) }
     }
 
@@ -51,7 +68,13 @@ impl TypedStackSlot {
         &self,
         builder: &mut FunctionBuilder<'_>,
         tv: &TypedValue,
+        offset: u32,
     ) -> Result<(), TypedOpError> {
+        assert!(
+            offset < self.count,
+            "out-of-bounds store of {tv:?} to {self:?}, offset={offset}"
+        );
+
         if &self.vt != &tv.value_type() {
             return Err(TypedOpError::InvalidStore {
                 slot_vt: self.vt.clone(),
@@ -60,7 +83,9 @@ impl TypedStackSlot {
         }
 
         let v = tv.value(builder);
-        builder.ins().stack_store(v, self.ss, 0);
+        builder
+            .ins()
+            .stack_store(v, self.ss, (self.el_size * offset) as i32);
 
         Ok(())
     }
@@ -80,6 +105,17 @@ pub enum TypedOpError {
         lhs: ValueType,
         rhs: ValueType,
         op: &'static str,
+    },
+    InvalidArrayEl {
+        deduced: ValueType,
+        found: ValueType,
+    },
+    InvalidIndexInto {
+        found: ValueType,
+    },
+    OutOfBounds {
+        vt: ValueType,
+        offset: u32,
     },
     InvalidCallArgsN {
         expected: usize,
@@ -112,6 +148,19 @@ impl TypedOpError {
                     op,
                     rhs.pretty()
                 )
+            }
+            TypedOpError::InvalidArrayEl { deduced, found } => {
+                format!(
+                    "Array deduced to store {}, found {}",
+                    deduced.pretty(),
+                    found.pretty()
+                )
+            }
+            TypedOpError::InvalidIndexInto { found } => {
+                format!("Cannot index into type {}, expected [_; N]", found.pretty())
+            }
+            TypedOpError::OutOfBounds { vt, offset } => {
+                format!("Index {} out of bounds for {}", offset, vt.pretty())
             }
             TypedOpError::InvalidCallArgsN { expected, found } => {
                 format!("Expected {expected} arguments, found {found}")
@@ -233,13 +282,13 @@ impl LoadCache {
             return Ok(TypedValue::UNIT);
         }
 
-        let clear_all = matches!(dst_ptr, Ptr::Value(_));
-
         let ptr_v = dst_ptr.value(builder);
         let src_v = src.value(builder);
         builder.ins().store(MemFlags::trusted(), src_v, ptr_v, 0);
 
-        if clear_all {
+        // Runtime pointers may alias with anything and so must invalidate the
+        // entire cache.
+        if matches!(dst_ptr, Ptr::Value(_)) {
             log::debug!("clear load cache: all");
             for layer in &mut self.layers {
                 layer.clear();
@@ -258,6 +307,7 @@ impl LoadCache {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Ptr {
     Literal(*mut u8),
+    Stack(StackSlot, u32),
     Value(Value),
 }
 
@@ -265,6 +315,7 @@ impl Ptr {
     pub fn value(self, builder: &mut FunctionBuilder<'_>) -> Value {
         match self {
             Ptr::Literal(iptr) => builder.ins().iconst(I64, iptr as i64),
+            Ptr::Stack(ss, offset) => builder.ins().stack_addr(I64, ss, offset as i32),
             Ptr::Value(value) => value,
         }
     }
@@ -276,6 +327,7 @@ pub enum ValueType {
     ExternPtr(ExternType),
     Float,
     Bool,
+    Array(Box<Self>, u32),
     Ref(Box<Self>),
 }
 
@@ -283,7 +335,7 @@ impl ValueType {
     /// Cranelift [`Type`] corresponding to this type
     pub fn cl_type(&self) -> Type {
         match self {
-            ValueType::ExternPtr(_) | ValueType::Ref(_) => I64,
+            ValueType::ExternPtr(_) | ValueType::Array(_, _) | ValueType::Ref(_) => I64,
             ValueType::Unit => I8,
             ValueType::Float => F32,
             ValueType::Bool => I8,
@@ -297,6 +349,7 @@ impl ValueType {
             ValueType::ExternPtr(et) => format!("Extern<{}>", et.id()),
             ValueType::Float => String::from("Float"),
             ValueType::Bool => String::from("Bool"),
+            ValueType::Array(vt, n) => format!("[{}; {}]", vt.pretty(), n),
             ValueType::Ref(vt) => format!("&{}", vt.pretty()),
         }
     }
@@ -308,6 +361,7 @@ pub(crate) enum TypedValueImpl {
     ExternPtr(Ptr, ExternType),
     Float(Value),
     Bool(Value),
+    Array(Ptr, ValueType, u32),
     Ref(Ptr, ValueType),
 }
 
@@ -333,16 +387,18 @@ impl TypedValue {
             ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Value(v), et),
             ValueType::Float => TypedValueImpl::Float(v),
             ValueType::Bool => TypedValueImpl::Bool(v),
-            ValueType::Ref(vt) => TypedValueImpl::Ref(Ptr::Value(v), (*vt).clone()),
+            ValueType::Array(vt, n) => TypedValueImpl::Array(Ptr::Value(v), *vt, n),
+            ValueType::Ref(vt) => TypedValueImpl::Ref(Ptr::Value(v), *vt),
         };
 
         TypedValue(tvi)
     }
 
-    pub(crate) unsafe fn with_ty_ptr(ty: ValueType, ptr: *mut u8) -> Self {
+    pub(crate) unsafe fn with_ty_ptr(ty: ValueType, ptr: Ptr) -> Self {
         let tvi = match ty.clone() {
-            ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(Ptr::Literal(ptr), et),
-            ValueType::Ref(inner_vt) => TypedValueImpl::Ref(Ptr::Literal(ptr), *inner_vt),
+            ValueType::ExternPtr(et) => TypedValueImpl::ExternPtr(ptr, et),
+            ValueType::Array(inner_vt, n) => TypedValueImpl::Array(ptr, *inner_vt, n),
+            ValueType::Ref(inner_vt) => TypedValueImpl::Ref(ptr, *inner_vt),
             _ => panic!("{ty:?} is not a reference type"),
         };
 
@@ -376,6 +432,39 @@ impl TypedValue {
         };
 
         cache.deref(builder, *ptr, vt.clone())
+    }
+
+    pub fn index(
+        &self,
+        builder: &mut FunctionBuilder<'_>,
+        offset: u32,
+    ) -> Result<TypedValue, TypedOpError> {
+        let TypedValue(tvi) = self;
+        let TypedValueImpl::Array(ptr, vt, length) = tvi else {
+            return Err(TypedOpError::InvalidIndexInto {
+                found: self.value_type(),
+            });
+        };
+
+        if offset >= *length {
+            return Err(TypedOpError::OutOfBounds {
+                vt: self.value_type(),
+                offset,
+            });
+        };
+
+        let sz = vt.cl_type().bytes();
+
+        let offset_ptr = match ptr {
+            Ptr::Literal(ptr) => Ptr::Literal(unsafe { ptr.offset((offset * sz) as isize) }),
+            Ptr::Stack(stack_slot, ex_offset) => Ptr::Stack(*stack_slot, ex_offset + (offset * sz)),
+            Ptr::Value(value) => {
+                let offset_v = builder.ins().iconst(I64, (offset * sz) as i64);
+                Ptr::Value(builder.ins().iadd(*value, offset_v))
+            }
+        };
+
+        Ok(unsafe { TypedValue::with_ty_ptr(ValueType::Ref(Box::new(vt.clone())), offset_ptr) })
     }
 
     pub fn neg(&self, builder: &mut FunctionBuilder<'_>) -> Result<TypedValue, TypedOpError> {
@@ -564,6 +653,7 @@ impl TypedValue {
             TypedValueImpl::ExternPtr(_, et) => ValueType::ExternPtr(*et),
             TypedValueImpl::Float(_) => ValueType::Float,
             TypedValueImpl::Bool(_) => ValueType::Bool,
+            TypedValueImpl::Array(_, vt, n) => ValueType::Array(Box::new(vt.clone()), *n),
             TypedValueImpl::Ref(_, vt) => ValueType::Ref(Box::new(vt.clone())),
         }
     }
@@ -571,13 +661,67 @@ impl TypedValue {
     pub fn value(&self, builder: &mut FunctionBuilder<'_>) -> Value {
         let TypedValue(tvi) = self;
         match tvi {
-            TypedValueImpl::ExternPtr(Ptr::Value(v), _)
-            | TypedValueImpl::Float(v)
-            | TypedValueImpl::Bool(v)
-            | TypedValueImpl::Ref(Ptr::Value(v), _) => *v,
-            TypedValueImpl::ExternPtr(Ptr::Literal(ptr), _)
-            | TypedValueImpl::Ref(Ptr::Literal(ptr), _) => builder.ins().iconst(I64, *ptr as i64),
+            TypedValueImpl::Float(v) | TypedValueImpl::Bool(v) => *v,
+            TypedValueImpl::ExternPtr(ptr, _)
+            | TypedValueImpl::Array(ptr, _, _)
+            | TypedValueImpl::Ref(ptr, _) => ptr.value(builder),
             TypedValueImpl::Unit => builder.ins().iconst(I8, 0),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ArrayBuilder {
+    vt: Option<ValueType>,
+    els: Vec<TypedValue>,
+}
+
+impl ArrayBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn append(&mut self, tv: TypedValue) -> Result<(), TypedOpError> {
+        if let Some(vt) = &self.vt {
+            if vt != &tv.value_type() {
+                return Err(TypedOpError::InvalidArrayEl {
+                    deduced: vt.clone(),
+                    found: tv.value_type(),
+                });
+            }
+        }
+
+        self.vt = Some(tv.value_type());
+        self.els.push(tv);
+
+        Ok(())
+    }
+
+    pub fn build(&mut self, builder: &mut FunctionBuilder<'_>) -> TypedValue {
+        let count = self.els.len() as u32;
+
+        let Some(vt) = self.vt.clone() else {
+            let empty_array = unsafe {
+                TypedValue::with_ty_ptr(
+                    ValueType::Array(Box::new(ValueType::Float), 0),
+                    Ptr::Literal(std::ptr::dangling_mut()),
+                )
+            };
+            return empty_array;
+        };
+
+        // Shouldn't be reachable
+        assert!(count > 0, "can't build array of size 0");
+
+        let tss = TypedStackSlot::new(builder, vt.clone(), count);
+
+        for (i, el_tv) in self.els.iter().enumerate() {
+            tss.store(builder, el_tv, i as u32)
+                .expect("array type mismatch");
+        }
+
+        unsafe {
+            TypedValue::with_ty_ptr(ValueType::Array(Box::new(vt), count), Ptr::Stack(tss.ss, 0))
         }
     }
 }

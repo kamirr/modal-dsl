@@ -112,7 +112,7 @@ mod tests {
     use crate::parse::{
         binop::{Binop, BinopKind},
         literal::{Literal, LiteralValue},
-        path::Ident,
+        path::{Ident, Path},
     };
 
     use super::*;
@@ -138,7 +138,7 @@ mod tests {
         let code = "while x > 0 {  }";
         let expected = Loop::while_(
             Binop {
-                left: Box::new(Ident::new("x", 6..7).into()),
+                left: Box::new(Path::new_single(Ident::new("x", 6..7)).into()),
                 right: Box::new(
                     Literal {
                         value: LiteralValue::Float(0.0),
@@ -167,7 +167,7 @@ mod tests {
             ("break", Break::new(0..5)),
             (
                 "break x",
-                Break::with_expr(Ident::new("x", 6..7).into(), 0..7),
+                Break::with_expr(Path::new_single(Ident::new("x", 6..7)).into(), 0..7),
             ),
         ];
 

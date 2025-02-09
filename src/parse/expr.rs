@@ -10,6 +10,7 @@ use chumsky::{
 use derive_more::derive::From;
 
 use super::{
+    array::Array,
     binop::{Binop, BinopKind},
     block::Block,
     call::Call,
@@ -17,19 +18,20 @@ use super::{
     let_::Let,
     literal::Literal,
     loop_::{Break, Loop},
-    path::Ident,
+    path::Path,
     unop::{Unop, UnopKind},
     yield_::Yield,
 };
 
 #[derive(Clone, Debug, PartialEq, From)]
 pub enum Expr {
+    Array(Array),
     Block(Block),
     Call(Call),
     If(If),
     Loop(Loop),
     Break(Break),
-    Var(Ident),
+    Var(Path),
     Let(Let),
     Yield(Yield),
     Literal(Literal),
@@ -42,6 +44,7 @@ impl Expr {
         recursive::recursive(|expr| {
             let atom = Literal::parser()
                 .map(Expr::Literal)
+                .or(Array::parser(expr.clone()).map(Expr::Array))
                 .or(Block::parser(expr.clone()).map(Expr::Block))
                 .or(Call::parser(expr.clone()).map(Expr::Call))
                 .or(If::parser(expr.clone()).map(Expr::If))
@@ -49,7 +52,7 @@ impl Expr {
                 .or(Break::parser(expr.clone()).map(Expr::Break))
                 .or(Let::parser(expr.clone()).map(Expr::Let))
                 .or(Yield::parser(expr.clone()).map(Expr::Yield))
-                .or(Ident::parser().map(Expr::Var))
+                .or(Path::parser().map(Expr::Var))
                 .or(expr.clone().delimited_by(just('('), just(')')))
                 .padded()
                 .boxed();
@@ -145,12 +148,13 @@ impl Expr {
 
     pub fn span(&self) -> Range<usize> {
         match self {
+            Expr::Array(array) => array.span.clone(),
             Expr::Block(block) => block.span.clone(),
             Expr::Call(call) => call.span.clone(),
             Expr::If(if_) => if_.span.clone(),
             Expr::Loop(loop_) => loop_.span.clone(),
             Expr::Break(break_) => break_.span.clone(),
-            Expr::Var(var) => var.span.clone(),
+            Expr::Var(path) => path.span.clone(),
             Expr::Let(let_) => let_.span.clone(),
             Expr::Yield(yield_) => yield_.span.clone(),
             Expr::Literal(literal) => literal.span.clone(),
@@ -173,7 +177,7 @@ mod tests {
 
     #[test]
     fn test_var() {
-        let cases = [("foo", Ident::new("foo", 0..3))];
+        let cases = [("foo", Path::new_single(Ident::new("foo", 0..3)))];
         for (text, expected) in cases {
             assert_eq!(Expr::parser().parse(text), Ok(expected.into()))
         }
@@ -206,7 +210,7 @@ mod tests {
         let cases = [(
             "yield foo",
             Yield {
-                value: Box::new(Ident::new("foo", 6..9).into()),
+                value: Box::new(Path::new_single(Ident::new("foo", 6..9)).into()),
                 span: 0..9,
             },
         )];
@@ -278,7 +282,7 @@ mod tests {
                         }
                         .into(),
                     ),
-                    right: Box::new(Ident::new("x", 8..9).into()),
+                    right: Box::new(Path::new_single(Ident::new("x", 8..9)).into()),
                     op: BinopKind::Add,
                     span: 0..9,
                 },

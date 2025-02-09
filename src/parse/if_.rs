@@ -60,7 +60,7 @@ mod tests {
         binop::{Binop, BinopKind},
         literal::{Literal, LiteralValue},
         loop_::Break,
-        path::Ident,
+        path::{Ident, Path},
         unop::{Unop, UnopKind},
     };
     use pretty_assertions::assert_eq;
@@ -97,7 +97,7 @@ mod tests {
         let code = "if a > 0.0 { break }";
         let expected = If::new(
             Expr::Binop(Binop {
-                left: Box::new(Expr::Var(Ident::new("a", 3..4))),
+                left: Box::new(Expr::Var(Path::new_single(Ident::new("a", 3..4)))),
                 right: Box::new(Expr::Literal(Literal {
                     value: LiteralValue::Float(0.0),
                     span: 7..10,
@@ -125,7 +125,7 @@ mod tests {
         let code = "if a < 1 { 1 } else if a < 2 { 2 } else { -1 }";
         let expected = If::new(
             Expr::Binop(Binop {
-                left: Box::new(Expr::Var(Ident::new("a", 3..4))),
+                left: Box::new(Expr::Var(Path::new_single(Ident::new("a", 3..4)))),
                 right: Box::new(Expr::Literal(Literal {
                     value: LiteralValue::Float(1.0),
                     span: 7..8,
@@ -143,7 +143,7 @@ mod tests {
             },
             Some(Expr::If(If::new(
                 Expr::Binop(Binop {
-                    left: Box::new(Expr::Var(Ident::new("a", 23..24))),
+                    left: Box::new(Expr::Var(Path::new_single(Ident::new("a", 23..24)))),
                     right: Box::new(Expr::Literal(Literal {
                         value: LiteralValue::Float(2.0),
                         span: 27..28,

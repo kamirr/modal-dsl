@@ -4,7 +4,7 @@ use std::{
     ptr::NonNull,
 };
 
-use super::typed::{TypedValue, ValueType};
+use super::typed::{Ptr, TypedValue, ValueType};
 
 #[derive(Debug)]
 pub struct StorageBuf {
@@ -115,7 +115,10 @@ impl MappedStorage {
                 //
                 // This is guaranteed by `MappedStorage::new` invariants.
                 unsafe {
-                    TypedValue::with_ty_ptr(ValueType::Ref(Box::new(entry.abi.clone())), entry.ptr)
+                    TypedValue::with_ty_ptr(
+                        ValueType::Ref(Box::new(entry.abi.clone())),
+                        Ptr::Literal(entry.ptr),
+                    )
                 }
             })
         })

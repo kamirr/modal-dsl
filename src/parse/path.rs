@@ -1,6 +1,11 @@
 use std::ops::Range;
 
-use chumsky::{error::Simple, prelude::just, text::ident, Parser};
+use chumsky::{
+    error::Simple,
+    prelude::{choice, just},
+    text::{digits, ident},
+    Parser,
+};
 
 use super::kwords;
 
@@ -34,23 +39,70 @@ impl Ident {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Path(pub Vec<Ident>);
+pub struct Number {
+    pub n: u32,
+    pub span: Range<usize>,
+}
+
+impl Number {
+    #[cfg(test)]
+    pub fn new(n: u32, span: Range<usize>) -> Self {
+        Number { n, span }
+    }
+
+    pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
+        digits(10)
+            .map(|s: String| s.parse::<u32>().unwrap())
+            .map_with_span(|n, span| Number { n, span })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Segment {
+    Member(Ident),
+    Index(Number),
+}
+
+impl Segment {
+    pub fn span(&self) -> Range<usize> {
+        match self {
+            Segment::Member(ident) => ident.span.clone(),
+            Segment::Index(number) => number.span.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Path {
+    pub base: Ident,
+    pub tail: Vec<Segment>,
+    pub span: Range<usize>,
+}
 
 impl Path {
+    #[cfg(test)]
+    pub fn new_single(base: Ident) -> Self {
+        let span = base.span.clone();
+        Path {
+            base,
+            tail: vec![],
+            span,
+        }
+    }
+
     pub fn parser() -> impl Parser<char, Self, Error = Simple<char>> {
         Ident::parser()
             .then(
                 just(".")
                     .ignored()
-                    .then(Ident::parser())
-                    .map(|((), ident)| ident)
+                    .then(choice((
+                        Ident::parser().map(Segment::Member),
+                        Number::parser().map(Segment::Index),
+                    )))
+                    .map(|((), member)| member)
                     .repeated(),
             )
-            .map(|(first, mut tail)| {
-                tail.insert(0, first);
-                tail
-            })
-            .map(Path)
+            .map_with_span(|(base, tail), span| Path { base, tail, span })
     }
 }
 
@@ -62,18 +114,32 @@ mod tests {
     #[test]
     fn test_path() {
         let cases = [
-            ("foo", Path(vec![Ident::new("foo", 0..3)])),
             (
-                "foo.bar",
-                Path(vec![Ident::new("foo", 0..3), Ident::new("bar", 4..7)]),
+                "foo",
+                Path {
+                    base: Ident::new("foo", 0..3),
+                    tail: vec![],
+                    span: 0..3,
+                },
             ),
             (
-                "foo.bar.baz",
-                Path(vec![
-                    Ident::new("foo", 0..3),
-                    Ident::new("bar", 4..7),
-                    Ident::new("baz", 8..11),
-                ]),
+                "foo.bar",
+                Path {
+                    base: Ident::new("foo", 0..3),
+                    tail: vec![Segment::Member(Ident::new("bar", 4..7))],
+                    span: 0..7,
+                },
+            ),
+            (
+                "foo.123.baz",
+                Path {
+                    base: Ident::new("foo", 0..3),
+                    tail: vec![
+                        Segment::Index(Number::new(123, 4..7)),
+                        Segment::Member(Ident::new("baz", 8..11)),
+                    ],
+                    span: 0..11,
+                },
             ),
         ];
 

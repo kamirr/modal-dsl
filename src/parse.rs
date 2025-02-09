@@ -4,6 +4,7 @@ use item::Item;
 use state::State;
 use step::Step;
 
+pub mod array;
 pub mod binop;
 pub mod block;
 pub mod call;
