@@ -139,7 +139,6 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 }
                 Segment::Index(Number { n, .. }) => {
                     tv = tv
-                        .autoderef(self.builder, &mut self.load_cache)
                         .index(self.builder, *n)
                         .map_err(|e| CompileError::new(e.msg(), segment.span()))?;
                 }
@@ -184,7 +183,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
                 .map_err(|e| CompileError::new(e.msg(), expr.span()))?;
         }
 
-        let array_tv = array_builder.build(self.builder);
+        let array_tv = array_builder.build();
         Ok(RecurseFlow::Continue(array_tv))
     }
 
@@ -261,7 +260,7 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         };
 
         retss
-            .store(self.builder, &to_store, 0)
+            .store(self.builder, &to_store)
             .map_err(|e| CompileError::new(e.msg(), span.clone()))?;
 
         Ok(RecurseFlow::Continue(to_store))
@@ -385,7 +384,9 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         }.clone();
 
         if ret_vt != ValueType::Unit {
-            let ret_cl_t = ret_vt.cl_type();
+            let &[ret_cl_t] = ret_vt.cl_decompose().as_slice() else {
+                unimplemented!()
+            };
             self.builder.append_block_param(merge_block, ret_cl_t);
         }
 
@@ -464,7 +465,9 @@ impl<'fb, 'b, 'vs> Recursor<'fb, 'b, 'vs> {
         };
 
         if loop_vt != ValueType::Unit {
-            let merge_block_param_ty = loop_vt.cl_type();
+            let &[merge_block_param_ty] = loop_vt.cl_decompose().as_slice() else {
+                unimplemented!()
+            };
 
             self.builder
                 .append_block_param(merge_block, merge_block_param_ty);

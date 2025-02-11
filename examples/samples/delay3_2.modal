@@ -1,0 +1,14 @@
+state {
+    b3 = [0, 0, 0],
+}
+
+inputs {
+    in = sig(),
+}
+
+step {
+    yield b3.0;
+    b3.0 = b3.1;
+    b3.1 = b3.2;
+    b3.2 = in;
+}

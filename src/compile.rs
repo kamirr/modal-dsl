@@ -149,10 +149,25 @@ impl Compiler {
         for (name, func) in stdlib.funcs() {
             let mut sig = module.make_signature();
             for arg in &func.args {
-                sig.params.push(AbiParam::new(arg.cl_type()));
+                let decomposed = arg.abi().entries;
+                let [arg] = decomposed.as_slice() else {
+                    return Err(anyhow::Error::msg(
+                        "Composite types not supported in extern Fn arguments",
+                    ));
+                };
+                sig.params.push(AbiParam::new(arg.cl_type));
             }
             match &func.ret {
-                Some(vt) => sig.returns.push(AbiParam::new(vt.cl_type())),
+                Some(vt) => {
+                    let decomposed = vt.abi().entries;
+                    let [ret] = decomposed.as_slice() else {
+                        return Err(anyhow::Error::msg(
+                            "Composite types not supported in extern Fn return",
+                        ));
+                    };
+                    sig.returns.push(AbiParam::new(ret.cl_type))
+                }
+
                 None => {}
             }
             extern_signatures.insert(name.to_string(), sig);
@@ -319,7 +334,7 @@ impl Compiler {
             stack.set(name.to_string(), ref_tv);
         }
 
-        let retss = TypedStackSlot::new(&mut builder, ValueType::Float, 1);
+        let retss = TypedStackSlot::new(&mut builder, ValueType::Float);
 
         let mut recursor = Recursor::new(
             &mut builder,
@@ -331,7 +346,7 @@ impl Compiler {
             recursor.recurse(expr)?;
         }
 
-        let read_ret = retss.load(&mut builder, 0).value(&mut builder);
+        let read_ret = retss.load(&mut builder).value(&mut builder);
         builder.ins().return_(&[read_ret]);
 
         log::debug!("step IR:\n{}", builder.func.display());
@@ -361,10 +376,8 @@ impl Compiler {
         let mut offsets = HashMap::new();
 
         for (name, tv, _kind) in entries {
-            let abi_type = tv.value_type().cl_type();
-
-            // Assumption that align is the same as size is overly restrictive
-            let (size, align) = (abi_type.bytes() as usize, abi_type.bytes() as usize);
+            let abi_type = tv.value_type().abi();
+            let (size, align) = (abi_type.size as usize, abi_type.align as usize);
 
             if offset % align != 0 {
                 offset = offset.next_multiple_of(align);
